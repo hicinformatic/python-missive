@@ -35,7 +35,7 @@ class CerteuropeProvider(BaseProvider):
     site_url = "https://www.certeurope.fr/"
     description_text = "Electronic registered email with legal value (LRE)"
     # Geographic scope
-    lre_geo = "Europe"
+    lre_geo = ["Europe"]
 
     def validate(self) -> tuple[bool, str]:
         """Validate that the recipient has an email and address"""

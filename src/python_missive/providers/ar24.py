@@ -19,8 +19,8 @@ class AR24Provider(BaseProvider):
     supported_types = ["POSTAL"]
     services = ["lre", "postal_registered"]
     # Geographic scope
-    lre_geo = "Europe"
-    postal_geo = "Europe"
+    lre_geo = ["Europe"]
+    postal_geo = ["Europe"]
     config_keys = ["AR24_API_TOKEN", "AR24_API_URL", "AR24_SENDER_ID"]
     required_packages = ["requests"]
     site_url = "https://www.ar24.fr/"

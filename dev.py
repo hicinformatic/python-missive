@@ -210,6 +210,7 @@ def task_help() -> bool:
     
     print(f"{GREEN}Providers:{NC}")
     print("  list-providers    List providers and check dependencies/config")
+    print("  list-providers-config  List all providers with their *_geo attributes")
     print("  provider-info     Display service information for a provider")
     print("")
     
@@ -659,6 +660,124 @@ def task_list_providers() -> bool:
     cmd = [str(python_exec), "-c", "\n".join(command_lines)]
     
     print_info("Checking providers status...")
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
+    return result.returncode == 0
+
+
+def task_list_providers_config() -> bool:
+    """List all providers with their *_geo attributes.
+    
+    Usage:
+        python dev.py list-providers-config [module_path]
+        
+    Examples:
+        python dev.py list-providers-config
+        python dev.py list-providers-config tests.test_config.MISSIVE_CONFIG_PROVIDERS
+    """
+    if not _ensure_venv_for_task("list-providers-config"):
+        return False
+
+    args = sys.argv[2:]
+    module_path = args[0] if args else None
+
+    # Load providers config
+    providers_config = None
+    providers_config_dict = None
+    
+    # Use provided module path or default
+    config_path = module_path or "tests.test_config.MISSIVE_CONFIG_PROVIDERS"
+    
+    try:
+        MISSIVE_CONFIG_PROVIDERS = load_module_attribute(config_path)
+        providers_config_dict = MISSIVE_CONFIG_PROVIDERS
+        providers_config = list(MISSIVE_CONFIG_PROVIDERS.keys()) if isinstance(MISSIVE_CONFIG_PROVIDERS, dict) else MISSIVE_CONFIG_PROVIDERS
+    except (ImportError, AttributeError, ValueError) as e:
+        print_error(f"Error loading module path '{config_path}': {e}")
+        if not module_path:
+            print_info("Usage: python dev.py list-providers-config [module_path]")
+            print_info("Example: python dev.py list-providers-config tests.test_config.MISSIVE_CONFIG_PROVIDERS")
+        return False
+
+    if not providers_config:
+        print_error("No providers found in configuration.")
+        return False
+
+    # Import provider utilities
+    python_exec = VENV_BIN / ("python.exe" if platform.system() == "Windows" else "python")
+    
+    command_lines = [
+        "from python_missive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
+        "",
+        "providers_config = " + repr(providers_config),
+        "providers_config_dict = " + repr(providers_config_dict),
+        "",
+        "# List of all possible geo attributes",
+        "geo_attrs = [",
+        "    'email_geo', 'sms_geo', 'postal_geo', 'lre_geo', 'rcs_geo',",
+        "    'voice_call_geo', 'notification_geo', 'push_notification_geo', 'branded_geo'",
+        "]",
+        "",
+        "print('=' * 80)",
+        "print('PROVIDERS GEOGRAPHIC COVERAGE')",
+        "print('=' * 80)",
+        "",
+        "for provider_path in providers_config:",
+        "    try:",
+        "        provider_class = load_provider_class(provider_path)",
+        "        provider_name = get_provider_name_from_path(provider_path)",
+        "        display_name = getattr(provider_class, 'display_name', provider_class.name)",
+        "        ",
+        "        print(f'\\n{provider_name.upper()} ({display_name})')",
+        "        print('-' * 80)",
+        "        print(f'  Path: {provider_path}')",
+        "        print(f'  Supported types: {provider_class.supported_types}')",
+        "        ",
+        "        # Check for geo attributes",
+        "        found_geo = False",
+        "        for geo_attr in geo_attrs:",
+        "            # Search through MRO to find the attribute",
+        "            geo_value = None",
+        "            for cls in provider_class.__mro__:",
+        "                if geo_attr in cls.__dict__:",
+        "                    attr_value = cls.__dict__[geo_attr]",
+        "                    if not callable(attr_value):",
+        "                        geo_value = attr_value",
+        "                        break",
+        "                elif hasattr(cls, geo_attr):",
+        "                    attr_value = getattr(cls, geo_attr)",
+        "                    if not callable(attr_value):",
+        "                        geo_value = attr_value",
+        "                        break",
+        "            ",
+        "            if geo_value is not None:",
+        "                found_geo = True",
+        "                if isinstance(geo_value, str):",
+        "                    if geo_value == '*':",
+        "                        display_value = 'Worldwide (no restrictions)'",
+        "                    else:",
+        "                        display_value = geo_value",
+        "                elif isinstance(geo_value, (list, tuple)):",
+        "                    if geo_value:",
+        "                        display_value = ', '.join(str(v) for v in geo_value)",
+        "                    else:",
+        "                        display_value = 'Worldwide (no restrictions)'",
+        "                else:",
+        "                    display_value = str(geo_value)",
+        "                print(f'    {geo_attr}: {display_value}')",
+        "        ",
+        "        if not found_geo:",
+        "            print('    (no geo attributes found)')",
+        "        ",
+        "    except ProviderImportError as e:",
+        "        print(f'\\nERROR: {provider_path}')",
+        "        print(f'  {e}')",
+        "",
+        "print('\\n' + '=' * 80)",
+    ]
+
+    cmd = [str(python_exec), "-c", "\n".join(command_lines)]
+    
+    print_info("Listing providers with geographic coverage...")
     result = subprocess.run(cmd, cwd=PROJECT_ROOT)
     return result.returncode == 0
 
@@ -1579,6 +1698,7 @@ COMMANDS = {
     "test_providers": task_test_providers,
     "test-providers-import": task_test_providers_import,
     "list-providers": task_list_providers,
+    "list-providers-config": task_list_providers_config,
     "provider-info": task_provider_info,
     "coverage": task_coverage,
     "lint": task_lint,

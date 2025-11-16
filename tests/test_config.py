@@ -29,6 +29,19 @@ MISSIVE_CONFIG_PROVIDERS = {
         ),
         "BREVO_SMS_SENDER": _get_env_or_default("BREVO_SMS_SENDER", ""),
     },
+    "python_missive.providers.sendgrid.SendGridProvider": {
+        "SENDGRID_API_KEY": _get_env_or_default("SENDGRID_API_KEY", "test_key"),
+    },
+    "python_missive.providers.mailgun.MailgunProvider": {
+        "MAILGUN_API_KEY": _get_env_or_default("MAILGUN_API_KEY", "test_key"),
+        "MAILGUN_DOMAIN": _get_env_or_default("MAILGUN_DOMAIN", "test.example.com"),
+    },
+    "python_missive.providers.ses.SESProvider": {
+        "AWS_ACCESS_KEY_ID": _get_env_or_default("AWS_ACCESS_KEY_ID", "test_key"),
+        "AWS_SECRET_ACCESS_KEY": _get_env_or_default("AWS_SECRET_ACCESS_KEY", "test_secret"),
+        "AWS_REGION": _get_env_or_default("AWS_REGION", "us-east-1"),
+        "SES_FROM_EMAIL": _get_env_or_default("SES_FROM_EMAIL", "noreply@example.com"),
+    },
     # SMS/Voice providers (multi-types)
     "python_missive.providers.smspartner.SMSPartnerProvider": {
         "SMSPARTNER_API_KEY": _get_env_or_default("SMSPARTNER_API_KEY", "test_key"),
@@ -38,11 +51,30 @@ MISSIVE_CONFIG_PROVIDERS = {
         "DEFAULT_FROM_EMAIL": _get_env_or_default("DEFAULT_FROM_EMAIL", ""),
         "DEFAULT_FROM_NAME": _get_env_or_default("DEFAULT_FROM_NAME", ""),
     },
+    "python_missive.providers.twilio.TwilioProvider": {
+        "TWILIO_ACCOUNT_SID": _get_env_or_default("TWILIO_ACCOUNT_SID", "test_sid"),
+        "TWILIO_AUTH_TOKEN": _get_env_or_default("TWILIO_AUTH_TOKEN", "test_token"),
+        "TWILIO_PHONE_NUMBER": _get_env_or_default("TWILIO_PHONE_NUMBER", "+1234567890"),
+    },
+    "python_missive.providers.vonage.VonageProvider": {
+        "VONAGE_API_KEY": _get_env_or_default("VONAGE_API_KEY", "test_key"),
+        "VONAGE_API_SECRET": _get_env_or_default("VONAGE_API_SECRET", "test_secret"),
+        "VONAGE_FROM_NUMBER": _get_env_or_default("VONAGE_FROM_NUMBER", "+1234567890"),
+    },
     # Postal/LRE providers
     "python_missive.providers.ar24.AR24Provider": {
         "AR24_API_TOKEN": _get_env_or_default("AR24_API_TOKEN", ""),
         "AR24_API_URL": _get_env_or_default("AR24_API_URL", "https://api.ar24.fr"),
         "AR24_SENDER_ID": _get_env_or_default("AR24_SENDER_ID", ""),
+    },
+    "python_missive.providers.laposte.LaPosteProvider": {
+        "LAPOSTE_API_KEY": _get_env_or_default("LAPOSTE_API_KEY", "test_key"),
+    },
+    "python_missive.providers.certeurope.CerteuropeProvider": {
+        "CERTEUROPE_API_KEY": _get_env_or_default("CERTEUROPE_API_KEY", "test_key"),
+        "CERTEUROPE_API_SECRET": _get_env_or_default("CERTEUROPE_API_SECRET", "test_secret"),
+        "CERTEUROPE_API_URL": _get_env_or_default("CERTEUROPE_API_URL", "https://api.certeurope.fr"),
+        "CERTEUROPE_SENDER_EMAIL": _get_env_or_default("CERTEUROPE_SENDER_EMAIL", "noreply@example.com"),
     },
     # Push notification providers
     "python_missive.providers.apn.APNProvider": {
@@ -50,6 +82,31 @@ MISSIVE_CONFIG_PROVIDERS = {
         "APN_KEY_ID": _get_env_or_default("APN_KEY_ID", ""),
         "APN_TEAM_ID": _get_env_or_default("APN_TEAM_ID", ""),
     },
+    "python_missive.providers.fcm.FCMProvider": {
+        "FCM_SERVER_KEY": _get_env_or_default("FCM_SERVER_KEY", "test_key"),
+    },
+    # Branded messaging providers
+    "python_missive.providers.telegram.TelegramProvider": {
+        "TELEGRAM_BOT_TOKEN": _get_env_or_default("TELEGRAM_BOT_TOKEN", "test_token"),
+    },
+    "python_missive.providers.slack.SlackProvider": {
+        "SLACK_BOT_TOKEN": _get_env_or_default("SLACK_BOT_TOKEN", "test_token"),
+        "SLACK_SIGNING_SECRET": _get_env_or_default("SLACK_SIGNING_SECRET", "test_secret"),
+    },
+    "python_missive.providers.teams.TeamsProvider": {
+        "TEAMS_CLIENT_ID": _get_env_or_default("TEAMS_CLIENT_ID", "test_client_id"),
+        "TEAMS_CLIENT_SECRET": _get_env_or_default("TEAMS_CLIENT_SECRET", "test_secret"),
+        "TEAMS_TENANT_ID": _get_env_or_default("TEAMS_TENANT_ID", "test_tenant_id"),
+    },
+    "python_missive.providers.signal.SignalProvider": {
+        "SIGNAL_API_KEY": _get_env_or_default("SIGNAL_API_KEY", "test_key"),
+    },
+    "python_missive.providers.messenger.MessengerProvider": {
+        "MESSENGER_PAGE_ACCESS_TOKEN": _get_env_or_default("MESSENGER_PAGE_ACCESS_TOKEN", "test_token"),
+        "MESSENGER_VERIFY_TOKEN": _get_env_or_default("MESSENGER_VERIFY_TOKEN", "test_verify"),
+    },
+    # In-app notification provider (no config needed)
+    "python_missive.providers.notification.InAppNotificationProvider": {},
 }
 
 # Note: Providers with multiple supported_types are automatically categorized
