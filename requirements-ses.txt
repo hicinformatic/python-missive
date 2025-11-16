@@ -1,0 +1,9 @@
+# Provider Amazon SES (Email)
+# Install with: pip install -r requirements-ses.txt
+
+# Required core dependencies
+-r requirements.txt
+
+# Package Amazon SES
+boto3>=1.28
+

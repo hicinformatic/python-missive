@@ -1,0 +1,9 @@
+# Email Providers (all email providers grouped)
+# Install with: pip install -r requirements-email.txt
+
+# Individual email providers
+-r requirements-sendgrid.txt
+-r requirements-mailgun.txt
+-r requirements-brevo.txt
+-r requirements-ses.txt
+

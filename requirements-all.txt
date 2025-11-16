@@ -1,0 +1,17 @@
+# All dependencies (core + all providers)
+# Install with: pip install -r requirements-all.txt
+
+# Core
+-r requirements.txt
+
+# All providers by category
+-r requirements-email.txt
+-r requirements-sms.txt
+-r requirements-branded.txt
+-r requirements-push.txt
+-r requirements-postal.txt
+
+# Note: The following providers use only 'requests' (already in requirements.txt)
+# - SMSPartner (SMS, Email, Voice)
+# - LaPoste, AR24, CertEurope (Postal)
+# - Signal, Messenger (Branded)

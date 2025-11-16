@@ -1,0 +1,10 @@
+# Provider Microsoft Teams (Messaging)
+# Install with: pip install -r requirements-teams.txt
+
+# Required core dependencies
+-r requirements.txt
+
+# Packages Microsoft Teams
+msgraph-core>=1.0
+msal>=1.25  # Microsoft Authentication Library
+

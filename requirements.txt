@@ -1,0 +1,9 @@
+# Production dependencies for python-missive
+# Install with: pip install -r requirements.txt
+
+# Validation
+phonenumbers>=8.13
+email-validator>=2.1
+
+# HTTP requests (for some providers)
+requests>=2.31

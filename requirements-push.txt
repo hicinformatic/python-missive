@@ -1,0 +1,7 @@
+# Push Notification Providers (all push providers grouped)
+# Install with: pip install -r requirements-push.txt
+
+# Individual push providers
+-r requirements-fcm.txt
+-r requirements-apn.txt
+

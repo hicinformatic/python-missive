@@ -1,0 +1,9 @@
+# SMS & Voice Providers (all SMS providers grouped)
+# Install with: pip install -r requirements-sms.txt
+
+# Individual SMS providers
+-r requirements-twilio.txt
+-r requirements-vonage.txt
+
+# Note: SMSPartner uses requests (already in requirements.txt)
+

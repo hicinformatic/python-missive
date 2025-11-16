@@ -1,0 +1,9 @@
+# Provider Telegram (Messaging)
+# Install with: pip install -r requirements-telegram.txt
+
+# Required core dependencies
+-r requirements.txt
+
+# Package Telegram
+python-telegram-bot>=20.7
+

@@ -1,0 +1,12 @@
+# Postal & LRE Providers (all postal providers grouped)
+# Install with: pip install -r requirements-postal.txt
+
+# Required core dependencies
+-r requirements.txt
+
+# Document generation
+reportlab>=4.0  # PDF generation for mail
+Pillow>=10.1  # Image processing for documents
+
+# Note: La Poste, AR24, CertEurope use requests (already in requirements.txt)
+
