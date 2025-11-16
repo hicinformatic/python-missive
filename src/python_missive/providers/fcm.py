@@ -23,6 +23,9 @@ class FCMProvider(BaseProvider):
     name = "fcm"
     display_name = "Firebase Cloud Messaging"
     supported_types = ["PUSH_NOTIFICATION"]
+    services = ["push_notification"]
+    # Geographic scope
+    push_notification_geo = "*"
     config_keys = ["FCM_SERVER_KEY"]
     required_packages = ["firebase-admin"]
     site_url = "https://firebase.google.com/products/cloud-messaging"

@@ -19,6 +19,8 @@ class SendGridProvider(BaseProvider):
     display_name = "SendGrid"
     supported_types = ["EMAIL"]
     services = ["email", "email_transactional", "email_marketing"]
+    # Geographic scope
+    email_geo = "*"
     config_keys = ["SENDGRID_API_KEY"]
     required_packages = ["sendgrid"]
     site_url = "https://sendgrid.com/"

@@ -22,6 +22,8 @@ class SlackProvider(BaseProvider):
     status_url = "https://status.slack.com/"
     documentation_url = "https://api.slack.com/"
     description_text = "Professional team collaboration messaging"
+    # Geographic scope
+    branded_geo = "*"
 
     def validate(self) -> tuple[bool, str]:
         """Validates recipient has Slack user_id or channel_id."""

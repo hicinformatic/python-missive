@@ -14,11 +14,14 @@ class TelegramProvider(BaseProvider):
     name = "telegram"
     display_name = "Telegram"
     supported_types = ["BRANDED"]
+    services = ["branded"]
     brands = ["telegram"]
     config_keys = ["TELEGRAM_BOT_TOKEN"]
     required_packages = ["python-telegram-bot"]
     site_url = "https://telegram.org/"
     description_text = "Secure instant messaging with bots"
+    # Geographic scope
+    branded_geo = "*"
 
     def validate(self) -> tuple[bool, str]:
         """Validates recipient has Telegram chat_id."""

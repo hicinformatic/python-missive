@@ -28,6 +28,10 @@ class SMSPartnerProvider(BaseProvider):
         "voice_call",
         "email",
     ]
+    # Geographic scopes
+    sms_geo = "*"
+    email_geo = "*"
+    voice_call_geo = "*"
     config_keys = [
         "SMSPARTNER_API_KEY",
         "SMSPARTNER_SENDER",

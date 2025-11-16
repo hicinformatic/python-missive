@@ -17,6 +17,8 @@ class MailgunProvider(BaseProvider):
     display_name = "Mailgun"
     supported_types = ["EMAIL"]
     services = ["email", "email_validation", "email_routing"]
+    # Geographic scope
+    email_geo = "*"
     config_keys = ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"]
     required_packages = ["mailgun"]
     site_url = "https://www.mailgun.com/"

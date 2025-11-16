@@ -28,6 +28,10 @@ class LaPosteProvider(BaseProvider):
         "email_ar",  # Email with electronic AR
         "colissimo",  # Parcel (future extension)
     ]
+    # Geographic scopes per service family
+    postal_geo = "FR"
+    email_geo = "FR"
+    lre_geo = "FR"
     config_keys = ["LAPOSTE_API_KEY"]
     required_packages = ["requests"]
     site_url = "https://www.laposte.fr/"

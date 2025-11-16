@@ -45,6 +45,75 @@ class MissiveSender:
             self._provider_configs = {}
             self._provider_paths = list(providers_config) if providers_config else []
 
+    # -------------------------------
+    # Geo helpers
+    # -------------------------------
+    @staticmethod
+    def _family_from_type(mtype: str) -> str:
+        mt = (mtype or "").upper()
+        return {
+            "POSTAL": "postal",
+            "EMAIL": "email",
+            "SMS": "sms",
+            "RCS": "rcs",
+            "PUSH_NOTIFICATION": "push_notification",
+            "NOTIFICATION": "notification",
+            "VOICE_CALL": "voice_call",
+            "BRANDED": "branded",
+            "LRE": "lre",
+        }.get(mt, mt.lower())
+
+    @staticmethod
+    def _get_destination(m: Missive) -> Dict[str, Optional[str]]:
+        opts = m.provider_options or {}
+        country = (
+            opts.get("country")
+            or opts.get("country_code")
+            or opts.get("destination_country")
+        )
+        continent = opts.get("continent") or opts.get("destination_continent")
+        recipient = getattr(m, "recipient", None)
+        metadata = getattr(recipient, "metadata", None) if recipient else None
+        if not country and isinstance(metadata, dict):
+            country = metadata.get("country_code") or metadata.get("country")
+            if not continent:
+                continent = metadata.get("continent") or metadata.get("region")
+        if isinstance(country, str):
+            country = country.strip()
+        if isinstance(continent, str):
+            continent = continent.strip()
+        return {"country": country, "continent": continent}
+
+    @staticmethod
+    def _tokenize_geo(value: Any) -> Union[str, list[str]]:
+        if value is None:
+            return "*"
+        if isinstance(value, str):
+            if value.strip() == "*":
+                return "*"
+            if "," in value:
+                return [v.strip() for v in value.split(",") if v.strip()]
+            return [value.strip()]
+        if isinstance(value, (list, tuple, set)):
+            return [str(v).strip() for v in value if str(v).strip()]
+        return []
+
+    @staticmethod
+    def _geo_allows(geo_value: Any, *, country: Optional[str], continent: Optional[str]) -> bool:
+        tokens = MissiveSender._tokenize_geo(geo_value)
+        if tokens == "*":
+            return True
+        token_set_lower = {t.lower() for t in tokens}
+        token_set_upper = {t.upper() for t in tokens}
+        if continent and continent.strip():
+            if continent.lower() in token_set_lower:
+                return True
+        if country and country.strip():
+            c = country.strip()
+            if c.lower() in token_set_lower or c.upper() in token_set_upper:
+                return True
+        return False
+
     def get_provider_paths(self, missive: Missive) -> List[str]:
         """Return ordered list of provider paths to try (by priority).
 
@@ -87,6 +156,67 @@ class MissiveSender:
         provider_config = self._provider_configs.get(provider_path, {})
         # Merge: default_config first, then provider-specific config (provider wins)
         return {**self.default_config, **provider_config}
+
+    def _attempt_send(
+        self,
+        provider_path: str,
+        *,
+        missive: Missive,
+        family: str,
+        destination: Dict[str, Optional[str]],
+        provider_kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Attempt sending with one provider and return a structured result."""
+        try:
+            provider_class = load_provider_class(provider_path)
+            provider_name = provider_class.__name__
+        except ProviderImportError as e:
+            return {
+                "provider": provider_path,
+                "provider_name": provider_path.split(".")[-1],
+                "status": "import_error",
+                "error": str(e),
+            }
+
+        # Geo check
+        geo_attr = f"{family}_geo"
+        geo_value = getattr(provider_class, geo_attr, "*")
+        if not self._geo_allows(
+            geo_value,
+            country=destination["country"],
+            continent=destination["continent"],
+        ):
+            return {
+                "provider": provider_name,
+                "provider_name": provider_name,
+                "status": "skipped_geo",
+                "geo": {geo_attr: geo_value, **destination},
+            }
+
+        # Instantiate and send
+        try:
+            provider_config = self.get_provider_config(provider_path)
+            provider = provider_class(
+                missive=missive,
+                config=provider_config,
+                **provider_kwargs,
+            )
+            if hasattr(provider, "send"):
+                success = provider.send()  # type: ignore[attr-defined]
+            else:
+                raise RuntimeError(f"Provider {provider_path} does not have send() method")
+            return {
+                "provider": provider_name,
+                "provider_name": provider_name,
+                "status": "success" if success else "failed",
+            }
+        except Exception as e:
+            return {
+                "provider": provider_path,
+                "provider_name": provider_class.__name__,
+                "status": "exception",
+                "error": str(e),
+            }
 
     def send(
         self,
@@ -133,84 +263,61 @@ class MissiveSender:
         last_error = None
         attempts = []
 
+        family = self._family_from_type(missive.missive_type)
+        destination = self._get_destination(missive)
+
         for index, provider_path in enumerate(provider_paths, 1):
-            try:
-                provider_class = load_provider_class(provider_path)
-                provider_name = provider_class.__name__
+            result = self._attempt_send(
+                provider_path,
+                missive=missive,
+                family=family,
+                destination=destination,
+                provider_kwargs=provider_kwargs,
+            )
+            status = result.get("status")
+            provider_name = result.get("provider_name", provider_path)
+            logger.info(f"Missive: Attempt {index}/{len(provider_paths)} with {provider_name}")
 
+            if status == "skipped_geo":
                 logger.info(
-                    f"Missive: Attempt {index}/{len(provider_paths)} with {provider_name}"
+                    f"Missive: Skipping {provider_name} — geo not allowed "
+                    f"(attempt {index}/{len(provider_paths)})"
                 )
-
-                # Get provider-specific config (merged with default)
-                provider_config = self.get_provider_config(provider_path)
-
-                # Instantiate provider with missive and config
-                provider = provider_class(
-                    missive=missive,
-                    config=provider_config,
-                    **provider_kwargs,
-                )
-                # BaseProvider has send() method, but mypy doesn't know it
-                if hasattr(provider, "send"):
-                    success = provider.send()  # type: ignore[attr-defined]
-                else:
-                    raise RuntimeError(f"Provider {provider_path} does not have send() method")
-
-                if success:
-                    logger.info(
-                        f"Missive: ✅ Sent successfully via {provider_name} "
-                        f"(attempt {index}/{len(provider_paths)})"
-                    )
-                    attempts.append(
-                        {
-                            "provider": provider_name,
-                            "status": "success",
-                            "attempt": index,
-                        }
-                    )
-
-                    # Update the provider used on the missive
-                    missive.provider = provider_path
-                    return True
-                else:
-                    logger.warning(f"Missive: ❌ Failed with {provider_name}")
-                    attempts.append(
-                        {
-                            "provider": provider_name,
-                            "status": "failed",
-                            "attempt": index,
-                        }
-                    )
-
-                    if not enable_fallback:
-                        raise RuntimeError(f"Send failed with {provider_name}")
-
-            except ProviderImportError as e:
-                error_msg = f"Provider '{provider_path}' not found: {e}"
-                logger.error(f"Missive: {error_msg}")
-                last_error = error_msg
-                attempts.append(
-                    {
-                        "provider": provider_path,
-                        "status": "import_error",
-                        "error": str(e),
-                    }
-                )
-
+                result["attempt"] = index
+                attempts.append(result)
+                continue
+            if status == "import_error":
+                msg = f"Provider '{provider_path}' not found: {result.get('error')}"
+                logger.error(f"Missive: {msg}")
+                last_error = msg
+                result["attempt"] = index
+                attempts.append(result)
                 if not enable_fallback:
-                    raise ValueError(error_msg)
-
-            except Exception as e:
-                error_msg = f"Error sending with {provider_path}: {e}"
-                logger.error(f"Missive: {error_msg}")
-                last_error = error_msg
-                attempts.append(
-                    {"provider": provider_path, "status": "exception", "error": str(e)}
-                )
-
+                    raise ValueError(msg)
+                continue
+            if status == "exception":
+                msg = f"Error sending with {provider_path}: {result.get('error')}"
+                logger.error(f"Missive: {msg}")
+                last_error = msg
+                result["attempt"] = index
+                attempts.append(result)
                 if not enable_fallback:
-                    raise
+                    raise RuntimeError(msg)
+                continue
+            if status == "success":
+                logger.info(
+                    f"Missive: ✅ Sent successfully via {provider_name} "
+                    f"(attempt {index}/{len(provider_paths)})"
+                )
+                attempts.append({"provider": provider_name, "status": "success", "attempt": index})
+                missive.provider = provider_path
+                return True
+            if status == "failed":
+                logger.warning(f"Missive: ❌ Failed with {provider_name}")
+                attempts.append({"provider": provider_name, "status": "failed", "attempt": index})
+                if not enable_fallback:
+                    raise RuntimeError(f"Send failed with {provider_name}")
+                continue
 
         # If we get here, all providers failed
         error_summary = "All providers failed. "

@@ -34,6 +34,9 @@ class BrevoProvider(BaseProvider):
     status_url = "https://status.brevo.com/"
     documentation_url = "https://developers.brevo.com/"
     description_text = "Complete CRM platform (Email, SMS, Marketing automation)"
+    # Geographic scopes
+    email_geo = "*"
+    sms_geo = "*"
 
     # ------------------------------------------------------------------
     # Common helpers

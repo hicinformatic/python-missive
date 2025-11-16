@@ -33,6 +33,8 @@ class TeamsProvider(BaseProvider):
     status_url = "https://status.azure.com/en-us/status"
     documentation_url = "https://learn.microsoft.com/en-us/microsoftteams/"
     description_text = "Microsoft Teams - Enterprise communication (Microsoft 365)"
+    # Geographic scope
+    branded_geo = "*"
 
     def validate(self) -> tuple[bool, str]:
         """Validate that the recipient has a Teams user_id or channel_id"""

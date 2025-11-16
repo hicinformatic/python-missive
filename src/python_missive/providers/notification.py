@@ -16,6 +16,8 @@ class InAppNotificationProvider(BaseProvider):
     display_name = "Notification In-App"
     supported_types = ["NOTIFICATION"]
     services = ["notification", "push_notification", "badge"]
+    # Geographic scope
+    notification_geo = "*"
     required_packages = []
     description_text = "In-app notifications without external dependency"
 

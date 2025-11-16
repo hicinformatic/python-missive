@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import MutableMapping
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
+from pathlib import Path
+import csv
 
 from ...status import MissiveStatus
 
@@ -321,6 +323,32 @@ class BaseProviderCommon:
                 f"Missing required configuration keys: {', '.join(missing_keys)}",
             )
 
+        # Enforce geographic scope config per service family
+        families = self._detect_service_families()
+        missing_geo: list[str] = []
+        invalid_geo: list[str] = []
+        for family in sorted(families):
+            key = f"{family}_geo"
+            if key not in self._raw_config:
+                missing_geo.append(key)
+                continue
+            value = self._raw_config.get(key)
+            ok, msg = self._validate_geo_config(value)
+            if not ok:
+                invalid_geo.append(f"{key}: {msg}")
+
+        if missing_geo:
+            return (
+                False,
+                "Missing geographic configuration for services: "
+                + ", ".join(missing_geo),
+            )
+        if invalid_geo:
+            return (
+                False,
+                "Invalid geographic configuration — " + " | ".join(invalid_geo),
+            )
+
         return True, ""
 
     def _calculate_risk_level(self, risk_score: int) -> str:
@@ -432,6 +460,147 @@ class BaseProviderCommon:
             "recommendations": recommendations,
             "should_send": risk_score < 70,
         }
+
+    # ------------------------------------------------------------------
+    # Geographic scope handling
+    # ------------------------------------------------------------------
+    _COUNTRIES_INDEX: Dict[str, set] | None = None
+
+    @classmethod
+    def _load_countries_index(cls) -> Dict[str, set]:
+        if cls._COUNTRIES_INDEX is not None:
+            return cls._COUNTRIES_INDEX
+
+        # Find data/countries.csv by walking up from this file location
+        csv_path: Path | None = None
+        here = Path(__file__).resolve()
+        for parent in [here, *here.parents]:
+            candidate = parent.parents[4] / "data" / "countries.csv" if len(parent.parents) >= 5 else None
+            if candidate and candidate.exists():
+                csv_path = candidate
+                break
+            # Fallback: project layout where src/ is directly under root
+            candidate2 = parent.parent / "data" / "countries.csv"
+            if candidate2.exists():
+                csv_path = candidate2
+                break
+
+        regions: set[str] = set()
+        subregions: set[str] = set()
+        countries: set[str] = set()
+        names: set[str] = set()
+        if csv_path and csv_path.exists():
+            try:
+                with csv_path.open("r", encoding="utf-8") as fh:
+                    reader = csv.DictReader(fh)
+                    for row in reader:
+                        cca2 = (row.get("cca2") or "").upper()
+                        cca3 = (row.get("cca3") or "").upper()
+                        name_common = (row.get("name_common") or "").strip().lower()
+                        region = (row.get("region") or "").strip()
+                        subregion = (row.get("subregion") or "").strip()
+                        if cca2:
+                            countries.add(cca2)
+                        if cca3:
+                            countries.add(cca3)
+                        if name_common:
+                            names.add(name_common)
+                        if region:
+                            regions.add(region)
+                        if subregion:
+                            subregions.add(subregion)
+            except Exception:
+                # On parsing error, keep empty sets (validation will be lenient)
+                pass
+
+        cls._COUNTRIES_INDEX = {
+            "regions": regions,
+            "subregions": subregions,
+            "countries": countries,
+            "names": names,
+        }
+        return cls._COUNTRIES_INDEX
+
+    def _detect_service_families(self) -> set[str]:
+        """Map declared services to canonical families for geo config."""
+        families: set[str] = set()
+        mapping = {
+            "postal": "postal",
+            "postal_registered": "postal",
+            "postal_signature": "postal",
+            "email": "email",
+            "email_ar": "email",
+            "sms": "sms",
+            "rcs": "rcs",
+            "push_notification": "push",
+            "notification": "notification",
+            "voice_call": "voice",
+            "branded": "branded",
+            "lre": "lre",
+        }
+        for service in self.services:
+            fam = mapping.get(service.strip().lower())
+            if fam:
+                families.add(fam)
+        # Also consider supported_types (e.g., POSTAL implies postal)
+        type_map = {
+            "POSTAL": "postal",
+            "EMAIL": "email",
+            "SMS": "sms",
+            "RCS": "rcs",
+            "PUSH_NOTIFICATION": "push",
+            "NOTIFICATION": "notification",
+            "VOICE_CALL": "voice",
+            "BRANDED": "branded",
+            "LRE": "lre",
+        }
+        for t in self.supported_types:
+            fam = type_map.get(str(t).upper())
+            if fam:
+                families.add(fam)
+        return families
+
+    @staticmethod
+    def _as_tokens(value: Any) -> list[str] | str:
+        if isinstance(value, str):
+            if value.strip() == "*":
+                return "*"
+            if "," in value:
+                return [v.strip() for v in value.split(",") if v.strip()]
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, (list, tuple)):
+            tokens: list[str] = []
+            for v in value:
+                s = str(v).strip()
+                if s:
+                    tokens.append(s)
+            return tokens
+        return []
+
+    def _validate_geo_config(self, value: Any) -> tuple[bool, str]:
+        tokens = self._as_tokens(value)
+        if tokens == "*":
+            return True, ""
+        idx = self._load_countries_index()
+        regions = idx["regions"]
+        subregions = idx["subregions"]
+        countries = idx["countries"]
+        names = idx["names"]
+        invalid: list[str] = []
+        for tok in tokens or []:
+            t_upper = tok.upper()
+            t_lower = tok.lower()
+            if (
+                t_upper in countries
+                or t_lower in names
+                or tok in regions
+                or tok in subregions
+            ):
+                continue
+            invalid.append(tok)
+        if invalid:
+            return False, f"unknown tokens: {', '.join(invalid)}"
+        return True, ""
 
 
 class _ConfigAccessor(MutableMapping):

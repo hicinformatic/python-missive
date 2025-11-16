@@ -26,6 +26,8 @@ class APNProvider(BaseProvider):
     display_name = "Apple Push Notification"
     supported_types = ["PUSH_NOTIFICATION"]
     services = ["push_notification"]
+    # Geographic scope
+    push_notification_geo = "*"
     config_keys = ["APN_CERTIFICATE_PATH", "APN_KEY_ID", "APN_TEAM_ID"]
     required_packages = ["aioapns"]
     site_url = "https://developer.apple.com/documentation/usernotifications"
