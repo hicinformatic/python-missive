@@ -10,6 +10,27 @@ from ...status import MissiveStatus
 class BasePostalMixin:
     """Postal mail-specific functionality mixin."""
 
+    # Default limit for postal pages
+    max_postal_pages: int = 50
+
+    # Allowed MIME types for postal attachments (formats that allow page counting)
+    # Empty list = all types allowed
+    allowed_attachment_mime_types: list[str] = [
+        # PDF documents (standard format with page structure)
+        "application/pdf",
+        # Microsoft Word documents (with page structure)
+        "application/msword",  # .doc
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    ]
+
+    # Allowed page formats for postal documents (empty list = all formats allowed)
+    allowed_page_formats: list[str] = [
+        "A4",
+        "Letter",
+        "Legal",
+        "A3",
+    ]
+
     def get_postal_service_info(self) -> Dict[str, Any]:
         """Return postal service information. Override in subclasses."""
         return {
@@ -116,6 +137,159 @@ class BasePostalMixin:
             prepared.append(file_info)
 
         return prepared
+
+    def _check_attachment_mime_type(
+        self, attachment: Any, idx: int
+    ) -> tuple[List[str], List[str]]:
+        """Check MIME type for a single attachment."""
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        mime_type = getattr(attachment, "mime_type", None)
+        if mime_type:
+            if (
+                self.allowed_attachment_mime_types
+                and mime_type not in self.allowed_attachment_mime_types
+            ):
+                errors.append(
+                    f"Attachment {idx + 1}: MIME type '{mime_type}' not allowed. "
+                    f"Allowed types: {', '.join(self.allowed_attachment_mime_types)}"
+                )
+        else:
+            warnings.append(f"Attachment {idx + 1}: MIME type not specified")
+
+        return errors, warnings
+
+    def _check_attachment_page_count(
+        self, attachment: Any, idx: int
+    ) -> tuple[Optional[int], List[str], List[str]]:
+        """Check page count for a single attachment."""
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        page_count = getattr(attachment, "page_count", None)
+        if page_count is not None:
+            try:
+                page_count = int(page_count)
+                if page_count > self.max_postal_pages:
+                    errors.append(
+                        f"Attachment {idx + 1}: {page_count} pages exceeds maximum "
+                        f"of {self.max_postal_pages} pages"
+                    )
+                return page_count, errors, warnings
+            except (ValueError, TypeError):
+                warnings.append(f"Attachment {idx + 1}: Invalid page_count value")
+
+        return None, errors, warnings
+
+    def _check_attachment_page_format(
+        self, attachment: Any, idx: int
+    ) -> tuple[List[str], List[str]]:
+        """Check page format for a single attachment."""
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        page_format = getattr(attachment, "page_format", None)
+        if page_format:
+            if (
+                self.allowed_page_formats
+                and page_format.upper() not in [
+                    fmt.upper() for fmt in self.allowed_page_formats
+                ]
+            ):
+                errors.append(
+                    f"Attachment {idx + 1}: Page format '{page_format}' not allowed. "
+                    f"Allowed formats: {', '.join(self.allowed_page_formats)}"
+                )
+
+        return errors, warnings
+
+    def check_attachments(
+        self, attachments: List[Any]
+    ) -> Dict[str, Any]:
+        """
+        Validate postal attachments against size, MIME type, page count, and page format limits.
+
+        Args:
+            attachments: List of attachment objects with attributes like:
+                - mime_type: MIME type of the file
+                - page_count: Number of pages (for documents)
+                - page_format: Page format (e.g., "A4", "Letter")
+                - size_bytes: File size in bytes (optional)
+
+        Returns:
+            Dict with validation results:
+                - is_valid: bool
+                - errors: List[str] of error messages
+                - warnings: List[str] of warning messages
+                - details: Dict with per-attachment validation details
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        details: Dict[str, Any] = {
+            "total_pages": 0,
+            "attachments_checked": 0,
+            "attachments_valid": 0,
+        }
+
+        if not attachments:
+            return {
+                "is_valid": True,
+                "errors": [],
+                "warnings": [],
+                "details": details,
+            }
+
+        total_pages = 0
+
+        for idx, attachment in enumerate(attachments):
+            attachment_errors: List[str] = []
+            attachment_warnings: List[str] = []
+
+            # Check MIME type
+            mime_errors, mime_warnings = self._check_attachment_mime_type(attachment, idx)
+            attachment_errors.extend(mime_errors)
+            attachment_warnings.extend(mime_warnings)
+
+            # Check page count
+            page_count, page_errors, page_warnings = self._check_attachment_page_count(
+                attachment, idx
+            )
+            attachment_errors.extend(page_errors)
+            attachment_warnings.extend(page_warnings)
+
+            if page_count is not None:
+                total_pages += page_count
+
+            # Check page format
+            format_errors, format_warnings = self._check_attachment_page_format(
+                attachment, idx
+            )
+            attachment_errors.extend(format_errors)
+            attachment_warnings.extend(format_warnings)
+
+            if attachment_errors:
+                errors.extend(attachment_errors)
+            if attachment_warnings:
+                warnings.extend(attachment_warnings)
+
+            details["attachments_checked"] += 1
+            if not attachment_errors:
+                details["attachments_valid"] += 1
+
+        # Check total pages across all attachments
+        details["total_pages"] = total_pages
+        if total_pages > self.max_postal_pages:
+            errors.append(
+                f"Total pages ({total_pages}) exceeds maximum of {self.max_postal_pages} pages"
+            )
+
+        return {
+            "is_valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "details": details,
+        }
 
     def cancel_postal(self, **kwargs) -> bool:
         """Cancel a scheduled postal missive (override in subclasses)."""

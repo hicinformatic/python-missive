@@ -11,6 +11,40 @@ from ...status import MissiveStatus
 class BaseEmailMixin:
     """Email-specific functionality mixin."""
 
+    # Default limit for email attachments (in MB)
+    max_email_attachment_size_mb: int = 25
+
+    # Allowed MIME types for email attachments (empty list = all types allowed)
+    allowed_attachment_mime_types: list[str] = [
+        # Documents
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # .pptx
+        "text/plain",
+        "text/csv",
+        "text/html",
+        # Images
+        "image/jpeg",
+        "image/png",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
+        # Archives
+        "application/zip",
+        "application/x-rar-compressed",
+        "application/x-tar",
+        "application/gzip",
+    ]
+
+    @property
+    def max_email_attachment_size_bytes(self) -> int:
+        """Return max attachment size in bytes."""
+        return int(self.max_email_attachment_size_mb * 1024 * 1024)
+
     def get_email_service_info(self) -> Dict[str, Any]:
         """Return email service information. Override in subclasses."""
         return {
@@ -133,6 +167,156 @@ class BaseEmailMixin:
             "content": file_content,
             "url": getattr(attachment, "external_url", None),
             "mime_type": getattr(attachment, "mime_type", None),
+        }
+
+    def _check_attachment_mime_type(
+        self, attachment: Any, idx: int
+    ) -> tuple[List[str], List[str]]:
+        """Check MIME type for a single attachment."""
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        mime_type = getattr(attachment, "mime_type", None)
+        if mime_type:
+            if (
+                self.allowed_attachment_mime_types
+                and mime_type not in self.allowed_attachment_mime_types
+            ):
+                errors.append(
+                    f"Attachment {idx + 1}: MIME type '{mime_type}' not allowed. "
+                    f"Allowed types: {', '.join(self.allowed_attachment_mime_types)}"
+                )
+        else:
+            warnings.append(f"Attachment {idx + 1}: MIME type not specified")
+
+        return errors, warnings
+
+    def _get_attachment_size(self, attachment: Any) -> Optional[int]:
+        """Get attachment size in bytes, trying multiple methods."""
+        size_bytes = getattr(attachment, "size_bytes", None)
+        if size_bytes is not None:
+            return size_bytes
+
+        # Try to get size from file object
+        file_obj = getattr(attachment, "file", None)
+        if file_obj and hasattr(file_obj, "read"):
+            try:
+                current_pos = file_obj.tell() if hasattr(file_obj, "tell") else 0
+                file_obj.seek(0, 2)  # Seek to end
+                size_bytes = file_obj.tell() if hasattr(file_obj, "tell") else None
+                file_obj.seek(current_pos)  # Restore position
+                return size_bytes
+            except Exception:
+                pass
+
+        return None
+
+    def _check_attachment_size(
+        self, attachment: Any, idx: int, max_size_bytes: int
+    ) -> tuple[Optional[int], List[str], List[str]]:
+        """Check file size for a single attachment."""
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        size_bytes = self._get_attachment_size(attachment)
+        if size_bytes is not None:
+            try:
+                size_bytes = int(size_bytes)
+                if size_bytes > max_size_bytes:
+                    size_mb = size_bytes / (1024 * 1024)
+                    max_mb = self.max_email_attachment_size_mb
+                    errors.append(
+                        f"Attachment {idx + 1}: Size {size_mb:.2f} MB exceeds maximum "
+                        f"of {max_mb} MB"
+                    )
+                return size_bytes, errors, warnings
+            except (ValueError, TypeError):
+                warnings.append(f"Attachment {idx + 1}: Invalid size_bytes value")
+        else:
+            warnings.append(f"Attachment {idx + 1}: File size not specified")
+
+        return None, errors, warnings
+
+    def check_attachments(
+        self, attachments: List[Any]
+    ) -> Dict[str, Any]:
+        """
+        Validate email attachments against size and MIME type limits.
+
+        Args:
+            attachments: List of attachment objects with attributes like:
+                - mime_type: MIME type of the file
+                - size_bytes: File size in bytes
+                - file: File object with read() method (optional)
+
+        Returns:
+            Dict with validation results:
+                - is_valid: bool
+                - errors: List[str] of error messages
+                - warnings: List[str] of warning messages
+                - details: Dict with per-attachment validation details
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        details: Dict[str, Any] = {
+            "total_size_bytes": 0,
+            "attachments_checked": 0,
+            "attachments_valid": 0,
+        }
+
+        if not attachments:
+            return {
+                "is_valid": True,
+                "errors": [],
+                "warnings": [],
+                "details": details,
+            }
+
+        total_size_bytes = 0
+        max_size_bytes = self.max_email_attachment_size_bytes
+
+        for idx, attachment in enumerate(attachments):
+            attachment_errors: List[str] = []
+            attachment_warnings: List[str] = []
+
+            # Check MIME type
+            mime_errors, mime_warnings = self._check_attachment_mime_type(attachment, idx)
+            attachment_errors.extend(mime_errors)
+            attachment_warnings.extend(mime_warnings)
+
+            # Check file size
+            size_bytes, size_errors, size_warnings = self._check_attachment_size(
+                attachment, idx, max_size_bytes
+            )
+            attachment_errors.extend(size_errors)
+            attachment_warnings.extend(size_warnings)
+
+            if size_bytes is not None:
+                total_size_bytes += size_bytes
+
+            if attachment_errors:
+                errors.extend(attachment_errors)
+            if attachment_warnings:
+                warnings.extend(attachment_warnings)
+
+            details["attachments_checked"] += 1
+            if not attachment_errors:
+                details["attachments_valid"] += 1
+
+        # Check total size across all attachments
+        details["total_size_bytes"] = total_size_bytes
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        if total_size_bytes > max_size_bytes:
+            errors.append(
+                f"Total attachment size ({total_size_mb:.2f} MB) exceeds maximum "
+                f"of {self.max_email_attachment_size_mb} MB"
+            )
+
+        return {
+            "is_valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "details": details,
         }
 
     def calculate_spam_score(self, subject: str, body: str) -> Dict[str, Any]:

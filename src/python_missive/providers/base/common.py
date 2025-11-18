@@ -83,7 +83,7 @@ class BaseProviderCommon:
         if self._config_accessor is not None:
             self._config_accessor.refresh()
         return self
-
+    
     @property
     def config(self) -> "_ConfigAccessor":
         """Return a proxy to configuration dict, callable for updates."""
@@ -97,10 +97,10 @@ class BaseProviderCommon:
 
     def check_package(self, package_name: str) -> bool:
         """Check if a required package is installed.
-
+        
         Args:
             package_name: Name of the package to check
-
+            
         Returns:
             True if the package can be imported, False otherwise
         """
@@ -117,7 +117,7 @@ class BaseProviderCommon:
 
     def check_required_packages(self) -> Dict[str, bool]:
         """Check all required packages and return their installation status.
-
+        
         Returns:
             Dict mapping package names to their installation status
         """
@@ -129,10 +129,10 @@ class BaseProviderCommon:
         self, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, bool]:
         """Check if all config_keys are present in the provided configuration.
-
+        
         Args:
             config: Configuration dict to check (defaults to self._raw_config)
-
+            
         Returns:
             Dict mapping config key names to their presence status
         """
@@ -144,10 +144,10 @@ class BaseProviderCommon:
         self, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Check both required packages and configuration keys.
-
+        
         Args:
             config: Configuration dict to check (defaults to self._raw_config)
-
+            
         Returns:
             Dict with 'packages' and 'config' keys containing their respective status dicts
         """
@@ -276,22 +276,6 @@ class BaseProviderCommon:
         service_type = self._detect_service_type()
         proof_services = {"lre", "postal_registered", "postal_signature", "email_ar"}
         return {service_type: service_type in proof_services}
-
-    def get_service_status(self) -> Dict[str, Any]:
-        """Return a high-level service status description."""
-        return {
-            "status": "unknown",
-            "is_available": None,
-            "services": list(self.services),
-            "credits": None,
-            "rate_limits": {},
-            "sla": {},
-            "last_check": self._get_last_check_time(),
-            "warnings": [
-                "get_service_status() method not implemented for this provider"
-            ],
-            "details": {},
-        }
 
     def check_service_availability(self) -> Dict[str, Any]:
         """Return lightweight service availability information."""
