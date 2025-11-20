@@ -12,7 +12,9 @@ from .base import BaseProvider, BaseProviderCommon
 from .brevo import BrevoProvider
 from .certeurope import CerteuropeProvider
 from .fcm import FCMProvider
+from .django_email import DjangoEmailProvider
 from .laposte import LaPosteProvider
+from .maileva import MailevaProvider
 from .mailgun import MailgunProvider
 from .messenger import MessengerProvider
 from .notification import InAppNotificationProvider
@@ -112,7 +114,7 @@ class ProviderRegistry:
     def group_paths_by_type(self) -> Dict[str, List[str]]:
         """Group registered providers by type, returning import paths."""
         mapping: Dict[str, List[str]] = {}
-        for name, provider_class in self.providers.items():
+        for provider_class in self.providers.values():
             import_path = f"{provider_class.__module__}.{provider_class.__name__}"
             for missive_type in provider_class.supported_types:
                 mapping.setdefault(missive_type, []).append(import_path)
@@ -136,8 +138,10 @@ __all__ = [
     "BrevoProvider",
     "CerteuropeProvider",
     "FCMProvider",
+    "DjangoEmailProvider",
     "InAppNotificationProvider",
     "LaPosteProvider",
+    "MailevaProvider",
     "MailgunProvider",
     "MessengerProvider",
     "SendGridProvider",

@@ -10,8 +10,8 @@ class BaseMonitoringMixin:
 
     def get_service_status(self) -> Dict[str, Any]:
         """Return provider service status. Override in subclasses."""
-        clock = getattr(self, "_clock", None)
-        last_check = clock() if callable(clock) else None
+        clock_fn = getattr(self, "_clock", None)
+        last_check = clock_fn() if callable(clock_fn) else None
 
         services = getattr(self, "services", [])
 

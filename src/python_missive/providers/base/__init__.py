@@ -187,11 +187,6 @@ class BaseProvider(
 
         return result if isinstance(result, (str, type(None))) else None
 
-    def check_service_availability(self) -> Dict[str, Any]:
-        """Return lightweight service availability information."""
-        # Delegate to BaseProviderCommon implementation
-        return super().check_service_availability()
-
     # calculate_delivery_risk is inherited from BaseProviderCommon
 
 

@@ -70,6 +70,12 @@ MISSIVE_CONFIG_PROVIDERS = {
     "python_missive.providers.laposte.LaPosteProvider": {
         "LAPOSTE_API_KEY": _get_env_or_default("LAPOSTE_API_KEY", "test_key"),
     },
+    "python_missive.providers.maileva.MailevaProvider": {
+        "MAILEVA_CLIENTID": _get_env_or_default("MAILEVA_CLIENTID", "test_client"),
+        "MAILEVA_SECRET": _get_env_or_default("MAILEVA_SECRET", "test_secret"),
+        "MAILEVA_USERNAME": _get_env_or_default("MAILEVA_USERNAME", "test_user"),
+        "MAILEVA_PASSWORD": _get_env_or_default("MAILEVA_PASSWORD", "test_pass"),
+    },
     "python_missive.providers.certeurope.CerteuropeProvider": {
         "CERTEUROPE_API_KEY": _get_env_or_default("CERTEUROPE_API_KEY", "test_key"),
         "CERTEUROPE_API_SECRET": _get_env_or_default("CERTEUROPE_API_SECRET", "test_secret"),

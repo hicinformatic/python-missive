@@ -83,7 +83,7 @@ class BaseProviderCommon:
         if self._config_accessor is not None:
             self._config_accessor.refresh()
         return self
-    
+
     @property
     def config(self) -> "_ConfigAccessor":
         """Return a proxy to configuration dict, callable for updates."""
@@ -97,10 +97,10 @@ class BaseProviderCommon:
 
     def check_package(self, package_name: str) -> bool:
         """Check if a required package is installed.
-        
+
         Args:
             package_name: Name of the package to check
-            
+
         Returns:
             True if the package can be imported, False otherwise
         """
@@ -117,7 +117,7 @@ class BaseProviderCommon:
 
     def check_required_packages(self) -> Dict[str, bool]:
         """Check all required packages and return their installation status.
-        
+
         Returns:
             Dict mapping package names to their installation status
         """
@@ -129,10 +129,10 @@ class BaseProviderCommon:
         self, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, bool]:
         """Check if all config_keys are present in the provided configuration.
-        
+
         Args:
             config: Configuration dict to check (defaults to self._raw_config)
-            
+
         Returns:
             Dict mapping config key names to their presence status
         """
@@ -144,10 +144,10 @@ class BaseProviderCommon:
         self, config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Check both required packages and configuration keys.
-        
+
         Args:
             config: Configuration dict to check (defaults to self._raw_config)
-            
+
         Returns:
             Dict with 'packages' and 'config' keys containing their respective status dicts
         """
@@ -180,7 +180,8 @@ class BaseProviderCommon:
         if error_message and hasattr(self.missive, "error_message"):
             self.missive.error_message = error_message
 
-        timestamp = self._clock()
+        clock_fn = getattr(self, "_clock", None)
+        timestamp = clock_fn() if callable(clock_fn) else datetime.now(timezone.utc)
         if status == MissiveStatus.SENT and hasattr(self.missive, "sent_at"):
             self.missive.sent_at = timestamp
         elif status == MissiveStatus.DELIVERED and hasattr(
@@ -286,6 +287,24 @@ class BaseProviderCommon:
             "status": "unknown",
             "last_check": self._get_last_check_time(),
             "warnings": ["Service availability check not implemented"],
+        }
+
+    def get_service_status(self) -> Dict[str, Any]:
+        """Provide a default status payload for monitoring dashboards."""
+        return {
+            "status": "unknown",
+            "is_available": None,
+            "services": list(self.services),
+            "credits": {
+                "type": "unknown",
+                "remaining": None,
+                "currency": "",
+                "limit": None,
+                "percentage": None,
+            },
+            "last_check": self._get_last_check_time(),
+            "warnings": ["get_service_status() not implemented for this provider"],
+            "details": {},
         }
 
     def validate(self) -> tuple[bool, str]:
@@ -459,7 +478,9 @@ class BaseProviderCommon:
         csv_path: Path | None = None
         here = Path(__file__).resolve()
         for parent in [here, *here.parents]:
-            candidate = parent.parents[4] / "data" / "countries.csv" if len(parent.parents) >= 5 else None
+            candidate = None
+            if len(parent.parents) >= 5:
+                candidate = parent.parents[4] / "data" / "countries.csv"
             if candidate and candidate.exists():
                 csv_path = candidate
                 break

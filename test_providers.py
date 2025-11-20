@@ -55,9 +55,11 @@ def test_provider_import_and_instantiation():
         ("SendGridProvider", "python_missive.providers.sendgrid"),
         ("MailgunProvider", "python_missive.providers.mailgun"),
         ("SESProvider", "python_missive.providers.ses"),
+        ("DjangoEmailProvider", "python_missive.providers.django_email"),
         ("TwilioProvider", "python_missive.providers.twilio"),
         ("VonageProvider", "python_missive.providers.vonage"),
         ("LaPosteProvider", "python_missive.providers.laposte"),
+        ("MailevaProvider", "python_missive.providers.maileva"),
         ("CerteuropeProvider", "python_missive.providers.certeurope"),
         ("SlackProvider", "python_missive.providers.slack"),
         ("TeamsProvider", "python_missive.providers.teams"),
@@ -87,7 +89,7 @@ def test_provider_import_and_instantiation():
             # Set appropriate missive type based on provider
             if provider_name in ["TwilioProvider", "VonageProvider"]:
                 missive.missive_type = "SMS"
-            elif provider_name in ["LaPosteProvider"]:
+            elif provider_name in ["LaPosteProvider", "MailevaProvider"]:
                 missive.missive_type = "POSTAL"
             elif provider_name in ["CerteuropeProvider"]:
                 missive.missive_type = "LRE"
@@ -113,6 +115,11 @@ def test_provider_import_and_instantiation():
                     "AWS_REGION": "eu-west-1",
                     "SES_FROM_EMAIL": "test@example.com"
                 }
+            elif provider_name == "DjangoEmailProvider":
+                config = {
+                    "DEFAULT_FROM_EMAIL": "noreply@example.com",
+                    "EMAIL_SUPPRESS_SEND": True,
+                }
             elif provider_name == "TwilioProvider":
                 config = {
                     "TWILIO_ACCOUNT_SID": "test_sid",
@@ -127,6 +134,13 @@ def test_provider_import_and_instantiation():
                 }
             elif provider_name == "LaPosteProvider":
                 config = {"LAPOSTE_API_KEY": "test_key"}
+            elif provider_name == "MailevaProvider":
+                config = {
+                    "MAILEVA_CLIENTID": "test_client",
+                    "MAILEVA_SECRET": "test_secret",
+                    "MAILEVA_USERNAME": "test_user",
+                    "MAILEVA_PASSWORD": "test_pass",
+                }
             elif provider_name == "CerteuropeProvider":
                 config = {
                     "CERTEUROPE_API_KEY": "test_key",

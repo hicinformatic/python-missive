@@ -121,7 +121,7 @@ class MissiveSender:
         If no providers_config is provided, returns empty list.
         """
         if missive.provider:
-            logger.info(f"Missive: Explicit provider '{missive.provider}'")
+            logger.info("Missive: Explicit provider '%s'", missive.provider)
             return [missive.provider]
 
         if not self.providers_config:
@@ -140,7 +140,9 @@ class MissiveSender:
             )
 
         logger.info(
-            f"Missive: Configured providers for {missive.missive_type}: {provider_paths}"
+            "Missive: Configured providers for %s: %s",
+            missive.missive_type,
+            provider_paths,
         )
         return provider_paths
 
@@ -256,8 +258,10 @@ class MissiveSender:
         if not provider_paths:
             raise ValueError(f"No provider configured for {missive.missive_type}")
 
+        total_attempts = len(provider_paths)
         logger.info(
-            f"Missive: Attempting to send with {len(provider_paths)} available provider(s)"
+            "Missive: Attempting to send with %d available provider(s)",
+            total_attempts,
         )
 
         last_error = None
@@ -276,19 +280,23 @@ class MissiveSender:
             )
             status = result.get("status")
             provider_name = result.get("provider_name", provider_path)
-            logger.info(f"Missive: Attempt {index}/{len(provider_paths)} with {provider_name}")
+            logger.info(
+                "Missive: Attempt %d/%d with %s", index, total_attempts, provider_name
+            )
 
             if status == "skipped_geo":
                 logger.info(
-                    f"Missive: Skipping {provider_name} — geo not allowed "
-                    f"(attempt {index}/{len(provider_paths)})"
+                    "Missive: Skipping %s — geo not allowed (attempt %d/%d)",
+                    provider_name,
+                    index,
+                    total_attempts,
                 )
                 result["attempt"] = index
                 attempts.append(result)
                 continue
             if status == "import_error":
                 msg = f"Provider '{provider_path}' not found: {result.get('error')}"
-                logger.error(f"Missive: {msg}")
+                logger.error("Missive: %s", msg)
                 last_error = msg
                 result["attempt"] = index
                 attempts.append(result)
@@ -297,7 +305,7 @@ class MissiveSender:
                 continue
             if status == "exception":
                 msg = f"Error sending with {provider_path}: {result.get('error')}"
-                logger.error(f"Missive: {msg}")
+                logger.error("Missive: %s", msg)
                 last_error = msg
                 result["attempt"] = index
                 attempts.append(result)
@@ -306,14 +314,16 @@ class MissiveSender:
                 continue
             if status == "success":
                 logger.info(
-                    f"Missive: ✅ Sent successfully via {provider_name} "
-                    f"(attempt {index}/{len(provider_paths)})"
+                    "Missive: ✅ Sent successfully via %s (attempt %d/%d)",
+                    provider_name,
+                    index,
+                    total_attempts,
                 )
                 attempts.append({"provider": provider_name, "status": "success", "attempt": index})
                 missive.provider = provider_path
                 return True
             if status == "failed":
-                logger.warning(f"Missive: ❌ Failed with {provider_name}")
+                logger.warning("Missive: ❌ Failed with %s", provider_name)
                 attempts.append({"provider": provider_name, "status": "failed", "attempt": index})
                 if not enable_fallback:
                     raise RuntimeError(f"Send failed with {provider_name}")
