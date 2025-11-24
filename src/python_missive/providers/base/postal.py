@@ -11,11 +11,11 @@ class BasePostalMixin:
     """Postal mail-specific functionality mixin."""
 
     # Default limit for postal pages
-    max_postal_pages: int = 50
+    postal_page_limit: int = 50
 
     # Allowed MIME types for postal attachments (formats that allow page counting)
     # Empty list = all types allowed
-    allowed_attachment_mime_types: list[str] = [
+    postal_allowed_attachment_mime_types: list[str] = [
         # PDF documents (standard format with page structure)
         "application/pdf",
         # Microsoft Word documents (with page structure)
@@ -24,12 +24,47 @@ class BasePostalMixin:
     ]
 
     # Allowed page formats for postal documents (empty list = all formats allowed)
-    allowed_page_formats: list[str] = [
+    postal_allowed_page_formats: list[str] = [
         "A4",
         "Letter",
         "Legal",
         "A3",
     ]
+    postal_color_printing_available: bool = True
+    postal_duplex_printing_available: bool = True
+    postal_price: float = 0.0
+    # Pricing per page
+    postal_page_price_color: float = 0.0
+    postal_page_price_black_white: float = 0.0
+    postal_page_price_single_sided: float = 0.0
+    postal_page_price_duplex: float = 0.0
+    postal_config_fields: list[str] = [
+        "postal_price",
+        "postal_page_limit",
+        "postal_allowed_attachment_mime_types",
+        "postal_allowed_page_formats",
+        "postal_color_printing_available",
+        "postal_duplex_printing_available",
+        "postal_page_price_color",
+        "postal_page_price_black_white",
+        "postal_page_price_single_sided",
+        "postal_page_price_duplex",
+    ]
+
+    @property
+    def max_postal_pages(self) -> int:
+        """Backward-compatible accessor for legacy attribute name."""
+        return self.postal_page_limit
+
+    @property
+    def allowed_attachment_mime_types(self) -> list[str]:
+        """Backward-compatible accessor for legacy attribute name."""
+        return self.postal_allowed_attachment_mime_types
+
+    @property
+    def allowed_page_formats(self) -> list[str]:
+        """Backward-compatible accessor for legacy attribute name."""
+        return self.postal_allowed_page_formats
 
     def get_postal_service_info(self) -> Dict[str, Any]:
         """Return postal service information. Override in subclasses."""
@@ -191,12 +226,9 @@ class BasePostalMixin:
 
         page_format = getattr(attachment, "page_format", None)
         if page_format:
-            if (
-                self.allowed_page_formats
-                and page_format.upper() not in [
-                    fmt.upper() for fmt in self.allowed_page_formats
-                ]
-            ):
+            if self.allowed_page_formats and page_format.upper() not in [
+                fmt.upper() for fmt in self.allowed_page_formats
+            ]:
                 errors.append(
                     f"Attachment {idx + 1}: Page format '{page_format}' not allowed. "
                     f"Allowed formats: {', '.join(self.allowed_page_formats)}"
@@ -204,9 +236,7 @@ class BasePostalMixin:
 
         return errors, warnings
 
-    def check_attachments(
-        self, attachments: List[Any]
-    ) -> Dict[str, Any]:
+    def check_attachments(self, attachments: List[Any]) -> Dict[str, Any]:
         """
         Validate postal attachments against size, MIME type, page count, and page format limits.
 
@@ -247,7 +277,9 @@ class BasePostalMixin:
             attachment_warnings: List[str] = []
 
             # Check MIME type
-            mime_errors, mime_warnings = self._check_attachment_mime_type(attachment, idx)
+            mime_errors, mime_warnings = self._check_attachment_mime_type(
+                attachment, idx
+            )
             attachment_errors.extend(mime_errors)
             attachment_warnings.extend(mime_warnings)
 

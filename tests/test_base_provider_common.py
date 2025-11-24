@@ -24,6 +24,7 @@ class DummyMissive:
         self.read_at: datetime | None = None
         self.missive_type: str = "EMAIL"
         self.is_registered: bool = False
+        self.requires_signature: bool = False
         self.save_calls: int = 0
 
     def save(self) -> None:
@@ -121,24 +122,28 @@ def test_create_event_invokes_logger() -> None:
 
 
 @pytest.mark.parametrize(
-    "missive_type,is_registered,expected",
+    "missive_type,is_registered,requires_signature,expected",
     [
-        ("EMAIL", False, "email"),
-        ("EMAIL", True, "email_ar"),
-        ("POSTAL", False, "postal"),
-        ("POSTAL", True, "postal_registered"),
-        ("SMS", False, "sms"),
-        ("BRANDED", False, DummyProvider.name.lower()),
-        ("RCS", False, "rcs"),
-        ("LRE", False, "lre"),
+        ("EMAIL", False, False, "email"),
+        ("EMAIL", True, False, "email_ar"),
+        ("POSTAL", False, False, "postal"),
+        ("POSTAL", True, False, "postal_registered"),
+        ("POSTAL", True, True, "postal_signature"),
+        ("POSTAL_REGISTERED", False, False, "postal_registered"),
+        ("POSTAL_REGISTERED", False, True, "postal_signature"),
+        ("SMS", False, False, "sms"),
+        ("BRANDED", False, False, DummyProvider.name.lower()),
+        ("RCS", False, False, "rcs"),
+        ("LRE", False, False, "lre"),
     ],
 )
 def test_detect_service_type(
-    missive_type: str, is_registered: bool, expected: str
+    missive_type: str, is_registered: bool, requires_signature: bool, expected: str
 ) -> None:
     missive = DummyMissive()
     missive.missive_type = missive_type
     missive.is_registered = is_registered
+    missive.requires_signature = requires_signature
 
     provider = DummyProvider(missive=missive)
 

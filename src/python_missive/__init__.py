@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Sequence, Union
 
+from .address_backends import (BaseAddressBackend, GoogleMapsAddressBackend,
+                               HereAddressBackend, MapboxAddressBackend,
+                               NominatimAddressBackend, PhotonAddressBackend)
+from .helpers import (format_phone_international,
+                      get_address_backends_from_config,
+                      get_address_from_backends)
 from .missive import Missive
 from .providers.base.common import BaseProviderCommon
 from .sender import MissiveSender
@@ -15,6 +21,15 @@ __all__ = [
     "Missive",
     "MissiveSender",
     "send_missive",
+    "format_phone_international",
+    "get_address_backends_from_config",
+    "get_address_from_backends",
+    "BaseAddressBackend",
+    "GoogleMapsAddressBackend",
+    "HereAddressBackend",
+    "MapboxAddressBackend",
+    "NominatimAddressBackend",
+    "PhotonAddressBackend",
 ]
 
 
@@ -76,10 +91,10 @@ def send_missive(
     elif missive_type in ("SMS", "VOICE_CALL"):
         if not recipient_phone:
             raise ValueError(f"recipient_phone required for {missive_type} missives")
-    elif missive_type == "POSTAL":
+    elif missive_type in ("POSTAL", "POSTAL_REGISTERED"):
         if not recipient and not recipient_email:
             raise ValueError(
-                "recipient or recipient_email required for POSTAL missives"
+                f"recipient or recipient_email required for {missive_type} missives"
             )
 
     # Create missive object
@@ -91,7 +106,7 @@ def send_missive(
         recipient_phone=recipient_phone,
         recipient=recipient,
         provider_options=kwargs.get("provider_options", {}),
-        is_registered=kwargs.get("is_registered", False),
+        is_registered=kwargs.get("is_registered", missive_type == "POSTAL_REGISTERED"),
         requires_signature=kwargs.get("requires_signature", False),
     )
 

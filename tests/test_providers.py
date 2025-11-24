@@ -255,6 +255,8 @@ def test_provider_method() -> None:
         "email": "EMAIL",
         "sms": "SMS",
         "postal": "POSTAL",
+        "postal_registered": "POSTAL_REGISTERED",
+        "postal_signature": "POSTAL_REGISTERED",
         "lre": "LRE",
         "push_notification": "PUSH_NOTIFICATION",
         "notification": "NOTIFICATION",

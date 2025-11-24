@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 from collections.abc import MutableMapping
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Optional
 from pathlib import Path
-import csv
+from typing import Any, Callable, Dict, Optional
 
 from ...status import MissiveStatus
 
@@ -53,6 +53,8 @@ class BaseProviderCommon:
         if not self.missive:
             return default
 
+        # Security: attribute parameter comes from internal code, not user input
+        # This is a private method used only by provider implementations
         value = getattr(self.missive, attribute, default)
 
         if callable(value):
@@ -104,13 +106,15 @@ class BaseProviderCommon:
         Returns:
             True if the package can be imported, False otherwise
         """
+        import importlib
+
         try:
-            __import__(package_name)
+            importlib.import_module(package_name)
             return True
         except ImportError:
             # Try with hyphens replaced by underscores (e.g., sib-api-v3-sdk -> sib_api_v3_sdk)
             try:
-                __import__(package_name.replace("-", "_"))
+                importlib.import_module(package_name.replace("-", "_"))
                 return True
             except ImportError:
                 return False
@@ -254,8 +258,14 @@ class BaseProviderCommon:
             return "lre"
         if missive_type == "POSTAL":
             if getattr(self.missive, "is_registered", False):
+                if getattr(self.missive, "requires_signature", False):
+                    return "postal_signature"
                 return "postal_registered"
             return "postal"
+        if missive_type == "POSTAL_REGISTERED":
+            if getattr(self.missive, "requires_signature", False):
+                return "postal_signature"
+            return "postal_registered"
         if missive_type == "EMAIL":
             if getattr(self.missive, "is_registered", False):
                 return "email_ar"

@@ -54,6 +54,9 @@ class BaseBrandedMixin:
 
         method_name = f"send_{str(target_name).lower()}"
 
+        # Security: method_name is constructed from target_name which comes from
+        # brand_name parameter or self.name (both are provider names, not user input)
+        # and is prefixed with "send_", so it's safe to use with getattr
         if not hasattr(self, method_name):
             self._update_status(
                 MissiveStatus.FAILED,
@@ -266,9 +269,7 @@ class BaseBrandedMixin:
 
         return None, errors, warnings
 
-    def check_attachments(
-        self, attachments: List[Any]
-    ) -> Dict[str, Any]:
+    def check_attachments(self, attachments: List[Any]) -> Dict[str, Any]:
         """
         Validate branded attachments against size and MIME type limits.
 
@@ -309,7 +310,9 @@ class BaseBrandedMixin:
             attachment_warnings: List[str] = []
 
             # Check MIME type
-            mime_errors, mime_warnings = self._check_attachment_mime_type(attachment, idx)
+            mime_errors, mime_warnings = self._check_attachment_mime_type(
+                attachment, idx
+            )
             attachment_errors.extend(mime_errors)
             attachment_warnings.extend(mime_warnings)
 

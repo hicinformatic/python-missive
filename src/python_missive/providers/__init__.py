@@ -11,8 +11,8 @@ from .ar24 import AR24Provider
 from .base import BaseProvider, BaseProviderCommon
 from .brevo import BrevoProvider
 from .certeurope import CerteuropeProvider
-from .fcm import FCMProvider
 from .django_email import DjangoEmailProvider
+from .fcm import FCMProvider
 from .laposte import LaPosteProvider
 from .maileva import MailevaProvider
 from .mailgun import MailgunProvider

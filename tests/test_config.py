@@ -13,6 +13,9 @@ Environment variables from .env file will override default values if present.
 """
 
 import os
+from typing import Any, Dict, Optional, Type
+
+from python_missive.address_backends import BaseAddressBackend
 
 
 def _get_env_or_default(key: str, default: str) -> str:
@@ -38,7 +41,9 @@ MISSIVE_CONFIG_PROVIDERS = {
     },
     "python_missive.providers.ses.SESProvider": {
         "AWS_ACCESS_KEY_ID": _get_env_or_default("AWS_ACCESS_KEY_ID", "test_key"),
-        "AWS_SECRET_ACCESS_KEY": _get_env_or_default("AWS_SECRET_ACCESS_KEY", "test_secret"),
+        "AWS_SECRET_ACCESS_KEY": _get_env_or_default(
+            "AWS_SECRET_ACCESS_KEY", "test_secret"
+        ),
         "AWS_REGION": _get_env_or_default("AWS_REGION", "us-east-1"),
         "SES_FROM_EMAIL": _get_env_or_default("SES_FROM_EMAIL", "noreply@example.com"),
     },
@@ -54,7 +59,9 @@ MISSIVE_CONFIG_PROVIDERS = {
     "python_missive.providers.twilio.TwilioProvider": {
         "TWILIO_ACCOUNT_SID": _get_env_or_default("TWILIO_ACCOUNT_SID", "test_sid"),
         "TWILIO_AUTH_TOKEN": _get_env_or_default("TWILIO_AUTH_TOKEN", "test_token"),
-        "TWILIO_PHONE_NUMBER": _get_env_or_default("TWILIO_PHONE_NUMBER", "+1234567890"),
+        "TWILIO_PHONE_NUMBER": _get_env_or_default(
+            "TWILIO_PHONE_NUMBER", "+1234567890"
+        ),
     },
     "python_missive.providers.vonage.VonageProvider": {
         "VONAGE_API_KEY": _get_env_or_default("VONAGE_API_KEY", "test_key"),
@@ -78,9 +85,15 @@ MISSIVE_CONFIG_PROVIDERS = {
     },
     "python_missive.providers.certeurope.CerteuropeProvider": {
         "CERTEUROPE_API_KEY": _get_env_or_default("CERTEUROPE_API_KEY", "test_key"),
-        "CERTEUROPE_API_SECRET": _get_env_or_default("CERTEUROPE_API_SECRET", "test_secret"),
-        "CERTEUROPE_API_URL": _get_env_or_default("CERTEUROPE_API_URL", "https://api.certeurope.fr"),
-        "CERTEUROPE_SENDER_EMAIL": _get_env_or_default("CERTEUROPE_SENDER_EMAIL", "noreply@example.com"),
+        "CERTEUROPE_API_SECRET": _get_env_or_default(
+            "CERTEUROPE_API_SECRET", "test_secret"
+        ),
+        "CERTEUROPE_API_URL": _get_env_or_default(
+            "CERTEUROPE_API_URL", "https://api.certeurope.fr"
+        ),
+        "CERTEUROPE_SENDER_EMAIL": _get_env_or_default(
+            "CERTEUROPE_SENDER_EMAIL", "noreply@example.com"
+        ),
     },
     # Push notification providers
     "python_missive.providers.apn.APNProvider": {
@@ -97,24 +110,146 @@ MISSIVE_CONFIG_PROVIDERS = {
     },
     "python_missive.providers.slack.SlackProvider": {
         "SLACK_BOT_TOKEN": _get_env_or_default("SLACK_BOT_TOKEN", "test_token"),
-        "SLACK_SIGNING_SECRET": _get_env_or_default("SLACK_SIGNING_SECRET", "test_secret"),
+        "SLACK_SIGNING_SECRET": _get_env_or_default(
+            "SLACK_SIGNING_SECRET", "test_secret"
+        ),
     },
     "python_missive.providers.teams.TeamsProvider": {
         "TEAMS_CLIENT_ID": _get_env_or_default("TEAMS_CLIENT_ID", "test_client_id"),
-        "TEAMS_CLIENT_SECRET": _get_env_or_default("TEAMS_CLIENT_SECRET", "test_secret"),
+        "TEAMS_CLIENT_SECRET": _get_env_or_default(
+            "TEAMS_CLIENT_SECRET", "test_secret"
+        ),
         "TEAMS_TENANT_ID": _get_env_or_default("TEAMS_TENANT_ID", "test_tenant_id"),
     },
     "python_missive.providers.signal.SignalProvider": {
         "SIGNAL_API_KEY": _get_env_or_default("SIGNAL_API_KEY", "test_key"),
     },
     "python_missive.providers.messenger.MessengerProvider": {
-        "MESSENGER_PAGE_ACCESS_TOKEN": _get_env_or_default("MESSENGER_PAGE_ACCESS_TOKEN", "test_token"),
-        "MESSENGER_VERIFY_TOKEN": _get_env_or_default("MESSENGER_VERIFY_TOKEN", "test_verify"),
+        "MESSENGER_PAGE_ACCESS_TOKEN": _get_env_or_default(
+            "MESSENGER_PAGE_ACCESS_TOKEN", "test_token"
+        ),
+        "MESSENGER_VERIFY_TOKEN": _get_env_or_default(
+            "MESSENGER_VERIFY_TOKEN", "test_verify"
+        ),
     },
     # In-app notification provider (no config needed)
     "python_missive.providers.notification.InAppNotificationProvider": {},
 }
 
+# =============================================================================
+# Address verification backends configuration
+# =============================================================================
+# Ordered list of address backends to try. The first working backend will be used.
+# Backends are tested in order until one is successfully configured and working.
+
+MISSIVE_CONFIG_ADDRESS_BACKENDS = [
+    # Free backends (no API key required) - try these first
+    {
+        "class": "python_missive.address_backends.nominatim.NominatimAddressBackend",
+        "config": {
+            "NOMINATIM_USER_AGENT": _get_env_or_default(
+                "NOMINATIM_USER_AGENT", "python-missive-test/1.0"
+            ),
+            "NOMINATIM_BASE_URL": _get_env_or_default(
+                "NOMINATIM_BASE_URL", "https://nominatim.openstreetmap.org"
+            ),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.photon.PhotonAddressBackend",
+        "config": {
+            "PHOTON_BASE_URL": _get_env_or_default(
+                "PHOTON_BASE_URL", "https://photon.komoot.io"
+            ),
+        },
+    },
+    # Paid backends (API key required) - try these if free ones fail
+    {
+        "class": "python_missive.address_backends.google_maps.GoogleMapsAddressBackend",
+        "config": {
+            "GOOGLE_MAPS_API_KEY": _get_env_or_default("GOOGLE_MAPS_API_KEY", ""),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.mapbox.MapboxAddressBackend",
+        "config": {
+            "MAPBOX_ACCESS_TOKEN": _get_env_or_default("MAPBOX_ACCESS_TOKEN", ""),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.here.HereAddressBackend",
+        "config": {
+            "HERE_APP_ID": _get_env_or_default("HERE_APP_ID", ""),
+            "HERE_APP_CODE": _get_env_or_default("HERE_APP_CODE", ""),
+        },
+    },
+]
+
 # Note: Providers with multiple supported_types are automatically categorized
 # according to their supported_types. No need to repeat them!
 # The test suite uses helpers.get_providers_from_config() to load and group providers.
+
+
+def _load_address_backend_class(backend_path: str) -> Type[BaseAddressBackend]:
+    """Load an address backend class from its import path.
+
+    This is a wrapper around the function in helpers.py for backward compatibility.
+    """
+    from python_missive.helpers import \
+        _load_address_backend_class as load_class
+
+    return load_class(backend_path)
+
+
+def get_working_address_backend(
+    test_address: Optional[Dict[str, Any]] = None,
+) -> Optional[BaseAddressBackend]:
+    """Get the first working address backend from configuration.
+
+    Tests backends in order until one is successfully configured and working.
+    If a backend is not configured or fails, tries the next one.
+
+    Args:
+        test_address: Optional test address to validate backend functionality.
+            If None, uses a default test address.
+
+    Returns:
+        First working backend instance, or None if all backends fail.
+
+    Example:
+        >>> backend = get_working_address_backend()
+        >>> if backend:
+        ...     result = backend.validate_address("123 Main St", city="Paris", country="FR")
+        ...     print(f"Address valid: {result['is_valid']}")
+    """
+    from python_missive.helpers import get_address_backends_from_config
+
+    if test_address is None:
+        test_address = {
+            "address_line1": "123 Test Street",
+            "city": "Paris",
+            "postal_code": "75001",
+            "country": "FR",
+        }
+
+    # Get configured backends
+    backends = get_address_backends_from_config(MISSIVE_CONFIG_ADDRESS_BACKENDS)
+
+    # Try to validate with each backend until one works
+    for backend in backends:
+        try:
+            result = backend.validate_address(**test_address)
+            errors = result.get("errors", [])
+            critical_errors = [
+                e
+                for e in errors
+                if "not configured" in e.lower()
+                or "not installed" in e.lower()
+                or ("error" in e.lower() and "no address found" not in e.lower())
+            ]
+            if not critical_errors:
+                return backend
+        except Exception:
+            continue
+
+    return None

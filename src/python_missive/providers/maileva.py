@@ -24,7 +24,7 @@ class MailevaProvider(BaseProvider):
 
     name = "Maileva"
     display_name = "Maileva"
-    supported_types = ["POSTAL", "LRE"]
+    supported_types = ["POSTAL", "POSTAL_REGISTERED", "LRE"]
     services = [
         "postal",  # Simple mail
         "postal_registered",  # Registered mail
@@ -112,8 +112,6 @@ class MailevaProvider(BaseProvider):
             return False
 
         try:
-            import requests
-
             access_token = self._get_access_token()
             if not access_token:
                 self._update_status(
@@ -121,49 +119,29 @@ class MailevaProvider(BaseProvider):
                 )
                 return False
 
-            api_base = self._get_api_base()
             is_registered = getattr(self.missive, "is_registered", False)
             requires_signature = getattr(self.missive, "requires_signature", False)
 
+            # TODO: Implement API call
+            # api_base = self._get_api_base()
             # Choose API version based on service type
-            if is_registered or requires_signature:
-                # Registered mail API v4
-                sendings_url = f"{api_base}/registered_mail/v4/sendings"
-            else:
-                # Simple mail API v2
-                sendings_url = f"{api_base}/mail/v2/sendings"
-
-            # Create sending
-            headers = {
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json",
-            }
-
-            # Build sending payload
-            recipient_address = self._get_missive_value("recipient_address", "")
-            address_lines = recipient_address.split("\n") if recipient_address else []
-
-            sending_data = {
-                "sender": {
-                    "name": self._config.get("MAILEVA_SENDER1", ""),
-                    "address_line_2": self._config.get("MAILEVA_SENDER2", ""),
-                    "address_line_4": self._config.get("MAILEVA_SENDER4", ""),
-                    "address_line_6": self._config.get("MAILEVA_SENDER6", ""),
-                    "country_code": self._config.get("MAILEVA_SENDERC", "FR"),
-                },
-                "recipient": {
-                    "name": address_lines[0] if address_lines else "",
-                    "address": "\n".join(address_lines[1:]) if len(address_lines) > 1 else "",
-                },
-                "options": {
-                    "color_printing": self._config.get("MAILEVA_COLOR_PRINTING", False),
-                    "duplex_printing": self._config.get("MAILEVA_DUPLEX_PRINTING", "on"),
-                    "optional_address_sheet": self._config.get(
-                        "MAILEVA_OPTIONAL_ADDRESS_SHEET", "on"
-                    ),
-                },
-            }
-
+            # if is_registered or requires_signature:
+            #     sendings_url = f"{api_base}/registered_mail/v4/sendings"
+            # else:
+            #     sendings_url = f"{api_base}/mail/v2/sendings"
+            #
+            # headers = {
+            #     "Authorization": f"Bearer {access_token}",
+            #     "Content-Type": "application/json",
+            # }
+            #
+            # recipient_address = self._get_missive_value("recipient_address", "")
+            # address_lines = recipient_address.split("\n") if recipient_address else []
+            # sending_data = {
+            #     "sender": {...},
+            #     "recipient": {...},
+            #     "options": {...},
+            # }
             # TODO: Add document upload
             # TODO: Add recipient details
             # TODO: Submit sending
@@ -237,8 +215,6 @@ class MailevaProvider(BaseProvider):
             return []
 
         try:
-            import requests
-
             access_token = self._get_access_token()
             if not access_token:
                 return []
@@ -246,11 +222,9 @@ class MailevaProvider(BaseProvider):
             api_base = self._get_api_base()
             sending_id = str(external_id).replace("mv_", "")
 
-            # Get deposit proofs
-            proofs_url = f"{api_base}/registered_mail/v4/global_deposit_proofs"
-            headers = {"Authorization": f"Bearer {access_token}"}
-
             # TODO: Implement real API call
+            # proofs_url = f"{api_base}/registered_mail/v4/global_deposit_proofs"
+            # headers = {"Authorization": f"Bearer {access_token}"}
             # response = requests.get(
             #     proofs_url,
             #     params={"sending_id": sending_id},
@@ -373,4 +347,3 @@ class MailevaProvider(BaseProvider):
 
 
 __all__ = ["MailevaProvider"]
-

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import sys
 from types import ModuleType
-from typing import List
+from typing import Any, Dict, List
 
 import pytest
 
-from python_missive.helpers import (get_provider_paths_from_config,
+from python_missive.helpers import (format_phone_international,
+                                    get_provider_paths_from_config,
+                                    get_providers_for_type,
                                     get_providers_from_config, load_providers)
 from python_missive.providers import (BaseProviderCommon, ProviderImportError,
                                       build_registry,
@@ -22,17 +24,19 @@ def module_factory():
     created: List[str] = []
 
     def factory(
-        module_name: str, provider_name: str, supported_types: List[str]
+        module_name: str,
+        provider_name: str,
+        supported_types: List[str],
+        extra_attrs: Dict[str, Any] | None = None,
     ) -> str:
         module = ModuleType(module_name)
-        DummyProvider = type(
-            provider_name,
-            (BaseProviderCommon,),
-            {
-                "name": provider_name,
-                "supported_types": list(supported_types),
-            },
-        )
+        attrs: Dict[str, Any] = {
+            "name": provider_name,
+            "supported_types": list(supported_types),
+        }
+        if extra_attrs:
+            attrs.update(extra_attrs)
+        DummyProvider = type(provider_name, (BaseProviderCommon,), attrs)
         setattr(module, provider_name, DummyProvider)
         sys.modules[module_name] = module
         created.append(module_name)
@@ -150,3 +154,164 @@ def test_build_registry_raises_when_provider_unknown() -> None:
 
     with pytest.raises(ProviderImportError):
         registry.instantiate("missing")
+
+
+def test_get_providers_for_type_supports_names_and_paths(module_factory) -> None:
+    email_path = module_factory("provider_target_email", "EmailProvider", ["EMAIL"])
+    sms_path = module_factory("provider_target_sms", "SmsProvider", ["SMS"])
+
+    config = [email_path, sms_path]
+
+    short_names = get_providers_for_type(config, "sms")
+    full_paths = get_providers_for_type(config, "sms", use_paths=True)
+    missing = get_providers_for_type(config, "unknown")
+
+    assert short_names == ["sms"]
+    assert full_paths == [sms_path]
+    assert missing == []
+
+
+def test_get_providers_for_type_ordering_by_class_attribute(module_factory) -> None:
+    slow_path = module_factory(
+        "provider_postal_slow",
+        "PostalSlow",
+        ["POSTAL"],
+        extra_attrs={"max_postal_pages": 200},
+    )
+    fast_path = module_factory(
+        "provider_postal_fast",
+        "PostalFast",
+        ["POSTAL"],
+        extra_attrs={"max_postal_pages": 80},
+    )
+
+    providers = get_providers_for_type(
+        [slow_path, fast_path],
+        "POSTAL",
+        ordering=["max_postal_pages"],
+    )
+    assert providers == ["postalfast", "postalslow"]
+
+    reversed_providers = get_providers_for_type(
+        [slow_path, fast_path],
+        "POSTAL",
+        ordering=["-max_postal_pages"],
+    )
+    assert reversed_providers == ["postalslow", "postalfast"]
+
+
+def test_get_providers_for_type_ordering_by_config_metadata(module_factory) -> None:
+    premium_path = module_factory(
+        "provider_email_premium",
+        "PremiumEmail",
+        ["EMAIL"],
+    )
+    budget_path = module_factory(
+        "provider_email_budget",
+        "BudgetEmail",
+        ["EMAIL"],
+    )
+
+    config = {
+        premium_path: {"price": 0.15},
+        budget_path: {"price": 0.05},
+    }
+
+    providers = get_providers_for_type(config, "EMAIL", ordering=["price"])
+    assert providers == ["budgetemail", "premiumemail"]
+
+    providers_desc = get_providers_for_type(config, "EMAIL", ordering=["-price"])
+    assert providers_desc == ["premiumemail", "budgetemail"]
+
+    overrides = {budget_path: {"price": 0.30}}
+    providers_override = get_providers_for_type(
+        config, "EMAIL", ordering=["price"], provider_metadata=overrides
+    )
+    assert providers_override == ["premiumemail", "budgetemail"]
+
+
+def test_get_providers_for_type_multi_field_ordering(module_factory) -> None:
+    cheap_fast = module_factory(
+        "provider_multi_cheap_fast",
+        "CheapFast",
+        ["SMS"],
+        extra_attrs={"priority": 2},
+    )
+    cheap_slow = module_factory(
+        "provider_multi_cheap_slow",
+        "CheapSlow",
+        ["SMS"],
+        extra_attrs={"priority": 5},
+    )
+    premium_fast = module_factory(
+        "provider_multi_premium_fast",
+        "PremiumFast",
+        ["SMS"],
+        extra_attrs={"priority": 1},
+    )
+
+    config = {
+        cheap_fast: {"price": 0.05},
+        cheap_slow: {"price": 0.05},
+        premium_fast: {"price": 0.15},
+    }
+
+    providers = get_providers_for_type(
+        config,
+        "SMS",
+        ordering=["price", "-priority"],
+    )
+
+    assert providers == ["cheapslow", "cheapfast", "premiumfast"]
+
+
+def test_format_phone_international_french_numbers() -> None:
+    """Test formatting French phone numbers."""
+    assert format_phone_international("06 12 34 56 78") == "+33612345678"
+    assert format_phone_international("0612345678") == "+33612345678"
+    assert format_phone_international("07 12 34 56 78") == "+33712345678"
+    assert format_phone_international("06-12-34-56-78") == "+33612345678"
+    assert format_phone_international("06.12.34.56.78") == "+33612345678"
+    assert format_phone_international("0612345678", "FR") == "+33612345678"
+
+
+def test_format_phone_international_already_international() -> None:
+    """Test formatting numbers already in international format."""
+    assert format_phone_international("+33 6 12 34 56 78") == "+33612345678"
+    assert format_phone_international("+33612345678") == "+33612345678"
+    assert format_phone_international("+1 555 123 4567") == "+15551234567"
+    assert format_phone_international("+44 20 7946 0958") == "+442079460958"
+    # Format 00 (alternative international format)
+    assert format_phone_international("0033 6 12 34 56 78") == "+33612345678"
+    assert format_phone_international("0033612345678") == "+33612345678"
+    assert format_phone_international("0044 20 7946 0958") == "+442079460958"
+
+
+def test_format_phone_international_with_country_code() -> None:
+    """Test formatting with explicit country code."""
+    assert format_phone_international("0123456789", "FR") == "+33123456789"
+    assert format_phone_international("0123456789", "GB") == "+44123456789"
+    # US uses +1 as country code (not area codes from CSV)
+    assert format_phone_international("0123456789", "US") == "+1123456789"
+
+
+def test_format_phone_international_other_countries() -> None:
+    """Test formatting numbers from other countries."""
+    # US number (10 digits)
+    assert format_phone_international("5551234567", "US") == "+15551234567"
+    # UK number
+    assert format_phone_international("2079460958", "GB") == "+442079460958"
+    # German number
+    assert format_phone_international("301234567", "DE") == "+49301234567"
+
+
+def test_format_phone_international_edge_cases() -> None:
+    """Test edge cases and invalid inputs."""
+    # Empty string
+    assert format_phone_international("") == ""
+    # Whitespace only (should return empty after strip)
+    assert format_phone_international("   ") == ""
+    # Already formatted
+    assert format_phone_international("+33612345678") == "+33612345678"
+    # Number without leading 0 and no country code (assumes international without +)
+    assert format_phone_international("33612345678") == "+33612345678"

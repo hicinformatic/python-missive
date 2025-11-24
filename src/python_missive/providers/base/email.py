@@ -12,10 +12,10 @@ class BaseEmailMixin:
     """Email-specific functionality mixin."""
 
     # Default limit for email attachments (in MB)
-    max_email_attachment_size_mb: int = 25
+    email_max_attachment_size_mb: int = 25
 
     # Allowed MIME types for email attachments (empty list = all types allowed)
-    allowed_attachment_mime_types: list[str] = [
+    email_allowed_attachment_mime_types: list[str] = [
         # Documents
         "application/pdf",
         "application/msword",
@@ -40,10 +40,27 @@ class BaseEmailMixin:
         "application/gzip",
     ]
 
+    email_price: float = 0.10
+    email_config_fields: list[str] = [
+        "email_price",
+        "email_max_attachment_size_mb",
+        "email_allowed_attachment_mime_types",
+    ]
+
+    @property
+    def max_email_attachment_size_mb(self) -> int:
+        """Backward-compatible accessor for legacy attribute name."""
+        return self.email_max_attachment_size_mb
+
+    @property
+    def allowed_attachment_mime_types(self) -> list[str]:
+        """Backward-compatible accessor for legacy attribute name."""
+        return self.email_allowed_attachment_mime_types
+
     @property
     def max_email_attachment_size_bytes(self) -> int:
         """Return max attachment size in bytes."""
-        return int(self.max_email_attachment_size_mb * 1024 * 1024)
+        return int(self.email_max_attachment_size_mb * 1024 * 1024)
 
     def get_email_service_info(self) -> Dict[str, Any]:
         """Return email service information. Override in subclasses."""
@@ -237,9 +254,7 @@ class BaseEmailMixin:
 
         return None, errors, warnings
 
-    def check_attachments(
-        self, attachments: List[Any]
-    ) -> Dict[str, Any]:
+    def check_attachments(self, attachments: List[Any]) -> Dict[str, Any]:
         """
         Validate email attachments against size and MIME type limits.
 
@@ -280,7 +295,9 @@ class BaseEmailMixin:
             attachment_warnings: List[str] = []
 
             # Check MIME type
-            mime_errors, mime_warnings = self._check_attachment_mime_type(attachment, idx)
+            mime_errors, mime_warnings = self._check_attachment_mime_type(
+                attachment, idx
+            )
             attachment_errors.extend(mime_errors)
             attachment_warnings.extend(mime_warnings)
 
@@ -375,6 +392,7 @@ class BaseEmailMixin:
             recommendations.extend(email_validation.get("warnings", []))
 
         risk_score = min(int(total_risk), 100)
+        # Security: "_calculate_risk_level" is a fixed string, not user input
         risk_level = getattr(
             self,
             "_calculate_risk_level",

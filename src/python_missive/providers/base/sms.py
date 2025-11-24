@@ -11,6 +11,15 @@ from ...status import MissiveStatus
 class BaseSMSMixin:
     """SMS-specific functionality mixin."""
 
+    sms_price: float = 0.50
+    sms_character_limit: int = 160
+    sms_unicode_character_limit: int = 70
+    sms_config_fields: list[str] = [
+        "sms_price",
+        "sms_character_limit",
+        "sms_unicode_character_limit",
+    ]
+
     def get_sms_service_info(self) -> Dict[str, Any]:
         """Return SMS service information. Override in subclasses."""
         return {
@@ -135,11 +144,11 @@ class BaseSMSMixin:
         encoding = "GSM-7" if is_gsm7 else "Unicode"
 
         if is_gsm7:
-            single_limit = 160
-            multi_limit = 153
+            single_limit = self.sms_character_limit
+            multi_limit = max(self.sms_character_limit - 7, 1)
         else:
-            single_limit = 70
-            multi_limit = 67
+            single_limit = self.sms_unicode_character_limit
+            multi_limit = max(self.sms_unicode_character_limit - 3, 1)
 
         length = len(message)
         if length == 0:
@@ -149,7 +158,9 @@ class BaseSMSMixin:
         else:
             segments = (length + multi_limit - 1) // multi_limit
 
-        cost_per_segment = self._config.get("SMS_COST_PER_SEGMENT", 0.05)
+        cost_per_segment = self._config.get(
+            "SMS_COST_PER_SEGMENT", self.sms_price or 0.05
+        )
         estimated_cost = segments * cost_per_segment
 
         return {

@@ -20,7 +20,7 @@ class LaPosteProvider(BaseProvider):
 
     name = "La Poste"
     display_name = "La Poste"
-    supported_types = ["POSTAL", "EMAIL", "LRE"]  # Mail, Email AR, and LRE
+    supported_types = ["POSTAL", "POSTAL_REGISTERED", "EMAIL", "LRE"]
     services = [
         "postal",  # Simple mail
         "postal_registered",  # Registered R1

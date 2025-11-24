@@ -254,6 +254,9 @@ def task_help() -> bool:
     print("  list-providers-config  List all providers with their *_geo attributes")
     print("  provider-info     Display service information for a provider")
     print("")
+    print(f"{GREEN}Address Backends:{NC}")
+    print("  address-info      List address verification backends and their status")
+    print("")
     
     print(f"{GREEN}Quality & Security:{NC}")
     print("  lint              Run flake8 and mypy")
@@ -1022,6 +1025,208 @@ def task_provider_info() -> bool:
     return result.returncode == 0
 
 
+def task_address_info() -> bool:
+    """List address verification backends and their status.
+    
+    Shows which backends are configured, working, and ready to use.
+    Tests backends in order until finding working ones.
+    """
+    if not _ensure_venv_for_task("address-info"):
+        return False
+
+    python_exec = VENV_BIN / ("python.exe" if platform.system() == "Windows" else "python")
+
+    command_lines = [
+        "import sys",
+        "from pathlib import Path",
+        "sys.path.insert(0, str(Path.cwd() / 'src'))",
+        "",
+        "from tests.test_config import MISSIVE_CONFIG_ADDRESS_BACKENDS",
+        "from python_missive.helpers import (",
+        "    get_address_backends_from_config,",
+        "    get_address_from_backends,",
+        ")",
+        "",
+        "print('=' * 80)",
+        "print('ADDRESS VERIFICATION BACKENDS')",
+        "print('=' * 80)",
+        "print()",
+        "",
+        "# Get all working backends from config",
+        "working_backends = get_address_backends_from_config(MISSIVE_CONFIG_ADDRESS_BACKENDS)",
+        "working_backend_names = {b.__class__.__name__ for b in working_backends}",
+        "",
+        "# Test which backend will be used by trying to validate an address",
+        "test_result = get_address_from_backends(",
+        "    MISSIVE_CONFIG_ADDRESS_BACKENDS,",
+        "    operation='validate',",
+        "    address_line1='123 Test St',",
+        "    city='Paris',",
+        "    postal_code='75001',",
+        "    country='FR',",
+        ")",
+        "selected_backend_name = test_result.get('backend_used')",
+        "",
+        "print(f'Total backends configured: {len(MISSIVE_CONFIG_ADDRESS_BACKENDS)}')",
+        "print(f'Working backends: {len(working_backends)}')",
+        "print()",
+        "",
+        "# Get all backends (including non-working) for display",
+        "all_backends_map = {}",
+        "for backend_config in MISSIVE_CONFIG_ADDRESS_BACKENDS:",
+        "    backend_class_name = backend_config['class'].split('.')[-1]",
+        "    all_backends_map[backend_class_name] = backend_config",
+        "",
+        "for i, backend_config in enumerate(MISSIVE_CONFIG_ADDRESS_BACKENDS, 1):",
+        "    backend_class_name = backend_config['class'].split('.')[-1]",
+        "    config = backend_config.get('config', {})",
+        "",
+        "    # Find if this backend is in the working list",
+        "    working_backend = None",
+        "    for wb in working_backends:",
+        "        if wb.__class__.__name__ == backend_class_name:",
+        "            working_backend = wb",
+        "            break",
+        "",
+        "    if working_backend:",
+        "        # Backend is working",
+        "        backend = working_backend",
+        "        check = backend.check_package_and_config()",
+        "        packages = check.get('packages', {})",
+        "        config_status = check.get('config', {})",
+        "        required_keys = backend.__class__.config_keys",
+        "",
+        "        is_selected = selected_backend_name == backend.name",
+        "        status_icon = '✓'",
+        "        status_text = 'Working (currently selected)' if is_selected else 'Working'",
+        "",
+        "        print(f'{i}. {backend_class_name}')",
+        "        print(f'   {status_icon} Status: {status_text}')",
+        "        print(f'   Name: {backend.name}')",
+        "",
+        "        if backend.documentation_url:",
+        "            print(f'   Documentation: {backend.documentation_url}')",
+        "        if backend.site_url:",
+        "            print(f'   Website: {backend.site_url}')",
+        "",
+        "        if required_keys:",
+        "            print(f'   Required config: {', '.join(required_keys)}')",
+        "            for key in required_keys:",
+        "                value = config.get(key, '')",
+        "                if value:",
+        "                    masked = value[:4] + '...' if len(value) > 4 else '***'",
+        "                    print(f'     - {key}: {masked}')",
+        "                else:",
+        "                    print(f'     - {key}: (not set)')",
+        "",
+        "        if backend.required_packages:",
+        "            print(f'   Required packages: {', '.join(backend.required_packages)}')",
+        "            for pkg in backend.required_packages:",
+        "                pkg_status = packages.get(pkg, 'unknown')",
+        "                status_display = '✓' if pkg_status == 'installed' else '✗'",
+        "                print(f'     - {pkg}: {status_display}')",
+        "",
+        "        # Test backend",
+        "        try:",
+        "            test_result = backend.validate_address(",
+        "                address_line1='123 Test St',",
+        "                city='Paris',",
+        "                postal_code='75001',",
+        "                country='FR',",
+        "            )",
+        "            errors = test_result.get('errors', [])",
+        "            critical_errors = [",
+        "                e for e in errors",
+        "                if 'not configured' in e.lower() or 'not installed' in e.lower()",
+        "            ]",
+        "            if not critical_errors:",
+        "                print(f'   Test: ✓ Backend responds correctly')",
+        "            else:",
+        "                print(f'   Test: ✗ Backend error: {errors[0] if errors else 'Unknown'}')",
+        "        except Exception as e:",
+        "            print(f'   Test: ✗ Error: {str(e)[:50]}')",
+        "",
+        "        print()",
+        "    else:",
+        "        # Backend is not working, try to load it to show why",
+        "        try:",
+        "            from python_missive.helpers import _load_address_backend_class",
+        "            backend_class = _load_address_backend_class(backend_config['class'])",
+        "            backend = backend_class(config=config)",
+        "            check = backend.check_package_and_config()",
+        "",
+        "            packages = check.get('packages', {})",
+        "            config_status = check.get('config', {})",
+        "            required_keys = backend_class.config_keys",
+        "",
+        "            missing_packages = [pkg for pkg, status in packages.items() if status == 'missing']",
+        "            if missing_packages:",
+        "                status_icon = '✗'",
+        "                status_text = f'Missing packages: {', '.join(missing_packages)}'",
+        "            else:",
+        "                missing_config = [",
+        "                    key",
+        "                    for key in required_keys",
+        "                    if config_status.get(key) != 'present' or not config.get(key)",
+        "                ]",
+        "                if missing_config:",
+        "                    status_icon = '⚠'",
+        "                    status_text = f'Missing config: {', '.join(missing_config)}'",
+        "                else:",
+        "                    status_icon = '⚠'",
+        "                    status_text = 'Not responding'",
+        "",
+        "            print(f'{i}. {backend_class_name}')",
+        "            print(f'   {status_icon} Status: {status_text}')",
+        "            print(f'   Name: {backend.name}')",
+        "",
+        "            if backend.documentation_url:",
+        "                print(f'   Documentation: {backend.documentation_url}')",
+        "            if backend.site_url:",
+        "                print(f'   Website: {backend.site_url}')",
+        "",
+        "            if required_keys:",
+        "                print(f'   Required config: {', '.join(required_keys)}')",
+        "                for key in required_keys:",
+        "                    value = config.get(key, '')",
+        "                    if value:",
+        "                        masked = value[:4] + '...' if len(value) > 4 else '***'",
+        "                        print(f'     - {key}: {masked}')",
+        "                    else:",
+        "                        print(f'     - {key}: (not set)')",
+        "",
+        "            if backend.required_packages:",
+        "                print(f'   Required packages: {', '.join(backend.required_packages)}')",
+        "                for pkg in backend.required_packages:",
+        "                    pkg_status = packages.get(pkg, 'unknown')",
+        "                    status_display = '✓' if pkg_status == 'installed' else '✗'",
+        "                    print(f'     - {pkg}: {status_display}')",
+        "",
+        "            print()",
+        "",
+        "        except (ImportError, AttributeError, ValueError) as e:",
+        "            print(f'{i}. {backend_class_name}')",
+        "            print(f'   ✗ Error loading backend: {e}')",
+        "            print()",
+        "",
+        "print('=' * 80)",
+        "if selected_backend_name:",
+        "    print(f'✓ Selected backend: {selected_backend_name}')",
+        "    print(f'  This backend will be used by default for address verification')",
+        "elif working_backends:",
+        "    print(f'⚠ {len(working_backends)} working backend(s) found, but none responded to test')",
+        "else:",
+        "    print('⚠ No working backend found')",
+        "    print('  Configure at least one backend to enable address verification')",
+        "print('=' * 80)",
+    ]
+
+    cmd = [str(python_exec), "-c", "\n".join(command_lines)]
+
+    result = subprocess.run(cmd, cwd=PROJECT_ROOT)
+    return result.returncode == 0
+
+
 def task_test_providers_import() -> bool:
     """Test that all providers can be imported and instantiated.
     
@@ -1090,6 +1295,8 @@ def task_test_providers() -> bool:
             "email": "EMAIL",
             "sms": "SMS",
             "postal": "POSTAL",
+            "postal_registered": "POSTAL_REGISTERED",
+            "postal_signature": "POSTAL_REGISTERED",
             "lre": "LRE",
             "push_notification": "PUSH_NOTIFICATION",
             "notification": "NOTIFICATION",
@@ -1227,7 +1434,6 @@ def task_check() -> bool:
         config_dict = {}
         try:
             MISSIVE_CONFIG_PROVIDERS = load_module_attribute("tests.test_config.MISSIVE_CONFIG_PROVIDERS")
-            provider_path = f"{module_name}.{provider_name}"
             # Find provider config by matching class name
             for path, config in MISSIVE_CONFIG_PROVIDERS.items():
                 if class_name in path or provider_name.lower() in path.lower():
@@ -1745,6 +1951,7 @@ COMMANDS = {
     "list-providers": task_list_providers,
     "list-providers-config": task_list_providers_config,
     "provider-info": task_provider_info,
+    "address-info": task_address_info,
     "coverage": task_coverage,
     "lint": task_lint,
     "format": task_format,
@@ -1785,7 +1992,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print_warning("\nOperation cancelled by user.")
         return 130
-    except Exception as exc:  # noqa: BLE001 - explicit diagnostic
+    except Exception as exc:
         print_error(f"Unexpected error: {exc}")
         import traceback
 

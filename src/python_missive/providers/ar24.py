@@ -16,7 +16,7 @@ class AR24Provider(BaseProvider):
 
     name = "ar24"
     display_name = "AR24 (LRE)"
-    supported_types = ["POSTAL"]
+    supported_types = ["POSTAL", "POSTAL_REGISTERED", "LRE"]
     services = ["lre", "postal_registered"]
     # Geographic scope
     lre_geo = ["Europe"]

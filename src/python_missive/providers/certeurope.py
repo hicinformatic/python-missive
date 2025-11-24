@@ -96,9 +96,7 @@ class CerteuropeProvider(BaseProvider):
         """
         return None
 
-    def get_proofs_of_delivery(  # noqa: E501
-        self, service_type: Optional[str] = None
-    ) -> list:
+    def get_proofs_of_delivery(self, service_type: Optional[str] = None) -> list:
         """
         Get all Certeurope proofs.
 
@@ -118,7 +116,7 @@ class CerteuropeProvider(BaseProvider):
         if not external_id or not str(external_id).startswith("certeurope_"):
             return []
 
-        # TODO: Real API call (SOAP or REST depending on version)  # noqa: E501
+        # TODO: Real API call (SOAP or REST depending on version)
 
         # Simulation
         clock = getattr(self, "_clock", None)
@@ -134,9 +132,7 @@ class CerteuropeProvider(BaseProvider):
                 "type": "deposit_certificate",
                 "label": "Deposit Certificate",
                 "available": True,
-                "url": (  # noqa: E501
-                    f"https://www.certeurope.fr/lre/deposit/{external_id}.pdf"
-                ),
+                "url": (f"https://www.certeurope.fr/lre/deposit/{external_id}.pdf"),
                 "generated_at": sent_at,
                 "expires_at": expiration,
                 "format": "pdf",
@@ -154,9 +150,7 @@ class CerteuropeProvider(BaseProvider):
                 "type": "archived_document",
                 "label": "Archived Document",
                 "available": True,
-                "url": (  # noqa: E501
-                    f"https://www.certeurope.fr/lre/archive/{external_id}.pdf"
-                ),
+                "url": (f"https://www.certeurope.fr/lre/archive/{external_id}.pdf"),
                 "generated_at": sent_at,
                 "expires_at": expiration,
                 "format": "pdf",
@@ -173,9 +167,7 @@ class CerteuropeProvider(BaseProvider):
                 "type": "qualified_timestamp",
                 "label": "Qualified Timestamp",
                 "available": True,
-                "url": (  # noqa: E501
-                    f"https://www.certeurope.fr/lre/timestamp/{external_id}.xml"
-                ),
+                "url": (f"https://www.certeurope.fr/lre/timestamp/{external_id}.xml"),
                 "generated_at": sent_at,
                 "expires_at": expiration,
                 "format": "xml",

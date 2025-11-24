@@ -53,6 +53,7 @@ class MissiveSender:
         mt = (mtype or "").upper()
         return {
             "POSTAL": "postal",
+            "POSTAL_REGISTERED": "postal",
             "EMAIL": "email",
             "SMS": "sms",
             "RCS": "rcs",
@@ -99,7 +100,9 @@ class MissiveSender:
         return []
 
     @staticmethod
-    def _geo_allows(geo_value: Any, *, country: Optional[str], continent: Optional[str]) -> bool:
+    def _geo_allows(
+        geo_value: Any, *, country: Optional[str], continent: Optional[str]
+    ) -> bool:
         tokens = MissiveSender._tokenize_geo(geo_value)
         if tokens == "*":
             return True
@@ -206,7 +209,9 @@ class MissiveSender:
             if hasattr(provider, "send"):
                 success = provider.send()  # type: ignore[attr-defined]
             else:
-                raise RuntimeError(f"Provider {provider_path} does not have send() method")
+                raise RuntimeError(
+                    f"Provider {provider_path} does not have send() method"
+                )
             return {
                 "provider": provider_name,
                 "provider_name": provider_name,
@@ -319,12 +324,16 @@ class MissiveSender:
                     index,
                     total_attempts,
                 )
-                attempts.append({"provider": provider_name, "status": "success", "attempt": index})
+                attempts.append(
+                    {"provider": provider_name, "status": "success", "attempt": index}
+                )
                 missive.provider = provider_path
                 return True
             if status == "failed":
                 logger.warning("Missive: ❌ Failed with %s", provider_name)
-                attempts.append({"provider": provider_name, "status": "failed", "attempt": index})
+                attempts.append(
+                    {"provider": provider_name, "status": "failed", "attempt": index}
+                )
                 if not enable_fallback:
                     raise RuntimeError(f"Send failed with {provider_name}")
                 continue

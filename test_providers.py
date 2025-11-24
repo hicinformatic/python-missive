@@ -80,7 +80,9 @@ def test_provider_import_and_instantiation():
     for provider_name, module_path in providers_to_test:
         try:
             # Import the provider
-            module = __import__(module_path, fromlist=[provider_name])
+            import importlib
+
+            module = importlib.import_module(module_path)
             provider_class = getattr(module, provider_name)
             
             # Create a mock missive

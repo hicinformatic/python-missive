@@ -61,10 +61,9 @@ class DjangoEmailProvider(BaseProvider):
             self._update_status(MissiveStatus.FAILED, error_message=error)
             return False
 
-        recipient = (
-            self._get_missive_value("get_recipient_email")
-            or self._get_missive_value("recipient_email")
-        )
+        recipient = self._get_missive_value(
+            "get_recipient_email"
+        ) or self._get_missive_value("recipient_email")
 
         if not recipient:
             self._update_status(
@@ -80,7 +79,9 @@ class DjangoEmailProvider(BaseProvider):
             return self._handle_send_error(exc)
 
         external_id = f"django_email_{getattr(self.missive, 'id', 'unknown')}"
-        self._update_status(MissiveStatus.SENT, provider=self.name, external_id=external_id)
+        self._update_status(
+            MissiveStatus.SENT, provider=self.name, external_id=external_id
+        )
         self._create_event("sent", f"Email dispatched via {delivery_target}")
         return True
 
@@ -103,9 +104,7 @@ class DjangoEmailProvider(BaseProvider):
 
     def get_service_status(self) -> Dict[str, Any]:
         """Return lightweight status for monitoring screens."""
-        backend = (
-            "smtp" if self._raw_config.get("EMAIL_HOST") else "file"
-        )
+        backend = "smtp" if self._raw_config.get("EMAIL_HOST") else "file"
         return {
             "status": "operational",
             "is_available": True,
@@ -127,9 +126,8 @@ class DjangoEmailProvider(BaseProvider):
     # ------------------------------------------------------------------
     def _collect_attachments(self) -> List[Dict[str, Any]]:
         attachments: List[Dict[str, Any]] = []
-        source = (
-            self._get_missive_value("attachments")
-            or getattr(self.missive, "attachments", None)
+        source = self._get_missive_value("attachments") or getattr(
+            self.missive, "attachments", None
         )
         if not source:
             return attachments
@@ -153,9 +151,8 @@ class DjangoEmailProvider(BaseProvider):
     def _build_email_message(self, recipient: str) -> EmailMessage:
         subject = str(self._get_missive_value("subject") or "Missive")
         body_html = self._get_missive_value("body") or ""
-        body_text = (
-            self._get_missive_value("body_text")
-            or (body_html if body_html and "<" not in body_html else "")
+        body_text = self._get_missive_value("body_text") or (
+            body_html if body_html and "<" not in body_html else ""
         )
 
         message = EmailMessage()
