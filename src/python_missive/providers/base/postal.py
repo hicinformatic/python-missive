@@ -6,79 +6,164 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
 
+POSTAL_SERVICE_VARIANTS = [
+    "postal",
+    "postal_registered",
+    "postal_signature",
+    "lre",
+    "lre_qualified",
+    "ere",
+]
+
+POSTAL_SERVICE_FIELDS = [
+    "price",
+    "archiving_duration",
+    "page_limit",
+    "allowed_attachment_mime_types",
+    "allowed_page_formats",
+    "color_printing_available",
+    "duplex_printing_available",
+    "page_price_color",
+    "page_price_black_white",
+    "page_price_single_sided",
+    "page_price_duplex",
+    "envelope_limits",
+    "geographic_coverage",
+]
+
+BASE_POSTAL_DEFAULTS = {
+    "page_limit": 50,
+    "allowed_attachment_mime_types": [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ],
+    "allowed_page_formats": ["A4", "Letter", "Legal", "A3"],
+    "color_printing_available": True,
+    "duplex_printing_available": True,
+    "price": 0.0,
+    "archiving_duration": 0,
+    "page_price_color": 0.0,
+    "page_price_black_white": 0.0,
+    "page_price_single_sided": 0.0,
+    "page_price_duplex": 0.0,
+    "envelope_limits": [],
+    "geographic_coverage": ["*"],
+}
+
 
 class BasePostalMixin:
     """Postal mail-specific functionality mixin."""
 
-    # Default limit for postal pages
-    postal_page_limit: int = 50
+    # auto-populate service attributes and config field lists
+    for _variant in POSTAL_SERVICE_VARIANTS:
+        prefix = f"{_variant}_"
+        defaults = BASE_POSTAL_DEFAULTS if _variant == "postal" else None
+        for field in POSTAL_SERVICE_FIELDS:
+            attr_name = f"{prefix}{field}"
+            locals()[attr_name] = (
+                defaults.get(field, None) if defaults is not None else None
+            )
+        config_fields_attr = f"{prefix}config_fields"
+        config_fields_list: list[str] = []
+        for field in POSTAL_SERVICE_FIELDS:
+            config_fields_list.append(f"{prefix}{field}")
+        locals()[config_fields_attr] = config_fields_list
+        legacy_alias = f"{prefix}geo"
+        locals()[legacy_alias] = locals().get(f"{prefix}geographic_coverage")
 
-    # Allowed MIME types for postal attachments (formats that allow page counting)
-    # Empty list = all types allowed
-    postal_allowed_attachment_mime_types: list[str] = [
-        # PDF documents (standard format with page structure)
-        "application/pdf",
-        # Microsoft Word documents (with page structure)
-        "application/msword",  # .doc
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
-    ]
+    def _get_postal_service_value(self, service: str, field: str) -> Any:
+        """Return configuration value for the given service, with postal fallback."""
+        normalized = (service or "postal").strip().lower()
+        attr_name = f"{normalized}_{field}"
+        if normalized != "postal" and hasattr(self, attr_name):
+            value = getattr(self, attr_name)
+            if value is not None:
+                return value
+        base_attr = f"postal_{field}"
+        return getattr(self, base_attr, None)
 
-    # Allowed page formats for postal documents (empty list = all formats allowed)
-    postal_allowed_page_formats: list[str] = [
-        "A4",
-        "Letter",
-        "Legal",
-        "A3",
-    ]
-    postal_color_printing_available: bool = True
-    postal_duplex_printing_available: bool = True
-    postal_price: float = 0.0
-    # Pricing per page
-    postal_page_price_color: float = 0.0
-    postal_page_price_black_white: float = 0.0
-    postal_page_price_single_sided: float = 0.0
-    postal_page_price_duplex: float = 0.0
-    postal_config_fields: list[str] = [
-        "postal_price",
-        "postal_page_limit",
-        "postal_allowed_attachment_mime_types",
-        "postal_allowed_page_formats",
-        "postal_color_printing_available",
-        "postal_duplex_printing_available",
-        "postal_page_price_color",
-        "postal_page_price_black_white",
-        "postal_page_price_single_sided",
-        "postal_page_price_duplex",
-    ]
+    def _build_service_info_payload(self, service: str) -> Dict[str, Any]:
+        """Construct generic service info payload from service-specific config."""
+        archiving_duration = self._get_postal_service_value(service, "archiving_duration")
+        envelope_limits = self._get_postal_service_value(service, "envelope_limits")
+        color_available = self._get_postal_service_value(
+            service, "color_printing_available"
+        )
+        duplex_available = self._get_postal_service_value(
+            service, "duplex_printing_available"
+        )
+        page_limit = self._get_postal_service_value(service, "page_limit")
+        mime_types = self._get_postal_service_value(
+            service, "allowed_attachment_mime_types"
+        )
+        page_formats = self._get_postal_service_value(service, "allowed_page_formats")
 
-    @property
-    def max_postal_pages(self) -> int:
-        """Backward-compatible accessor for legacy attribute name."""
-        return self.postal_page_limit
-
-    @property
-    def allowed_attachment_mime_types(self) -> list[str]:
-        """Backward-compatible accessor for legacy attribute name."""
-        return self.postal_allowed_attachment_mime_types
-
-    @property
-    def allowed_page_formats(self) -> list[str]:
-        """Backward-compatible accessor for legacy attribute name."""
-        return self.postal_allowed_page_formats
-
-    def get_postal_service_info(self) -> Dict[str, Any]:
-        """Return postal service information. Override in subclasses."""
         return {
             "credits": None,
             "credits_type": "amount",
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": archiving_duration,
+                "envelope_limits": envelope_limits,
+                "page_limit": page_limit,
+                "allowed_attachment_mime_types": mime_types,
+                "allowed_page_formats": page_formats,
+            },
             "warnings": [
-                "get_postal_service_info() method not implemented for this provider"
+                "service info not overridden for %s" % service
             ],
             "options": [],
-            "details": {},
+            "details": {
+                "color_printing_available": color_available,
+                "duplex_printing_available": duplex_available,
+                "geographic_coverage": self._get_postal_service_value(
+                    service, "geographic_coverage"
+                ),
+            },
         }
+
+    def get_postal_service_info(self) -> Dict[str, Any]:
+        """Return postal service information. Override in subclasses."""
+        info = self._build_service_info_payload("postal")
+        info["warnings"] = [
+            "get_postal_service_info() method not implemented for this provider"
+        ]
+        return info
+
+    def get_postal_registered_service_info(self) -> Dict[str, Any]:
+        """Registered mail info delegates to postal info unless overridden."""
+        info = self._build_service_info_payload("postal_registered")
+        info["warnings"] = [
+            "get_postal_registered_service_info() method not implemented for this provider"
+        ]
+        return info
+
+    def get_postal_signature_service_info(self) -> Dict[str, Any]:
+        """Signature-required mail info delegates to registered info."""
+        info = self._build_service_info_payload("postal_signature")
+        info["warnings"] = [
+            "get_postal_signature_service_info() method not implemented for this provider"
+        ]
+        return info
+
+    def get_lre_service_info(self) -> Dict[str, Any]:
+        """LRE service info placeholder."""
+        info = self._build_service_info_payload("lre")
+        info["warnings"] = ["get_lre_service_info() method not implemented"]
+        return info
+
+    def get_lre_qualified_service_info(self) -> Dict[str, Any]:
+        """Qualified LRE info placeholder."""
+        info = self._build_service_info_payload("lre_qualified")
+        info["warnings"] = ["get_lre_qualified_service_info() method not implemented"]
+        return info
+
+    def get_ere_service_info(self) -> Dict[str, Any]:
+        """Electronic registered email info placeholder."""
+        info = self._build_service_info_payload("ere")
+        info["warnings"] = ["get_ere_service_info() method not implemented"]
+        return info
 
     def check_postal_delivery_status(self, **kwargs) -> Dict[str, Any]:
         """Check postal delivery status. Override in subclasses."""
@@ -89,6 +174,34 @@ class BasePostalMixin:
             "signature_proof": None,
             "error_code": None,
             "error_message": "check_postal_delivery_status() method not implemented for this provider",
+            "details": {},
+        }
+
+    def check_postal_registered_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        """Delegates to postal status unless overridden."""
+        return self.check_postal_delivery_status(**kwargs)
+
+    def check_postal_signature_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        """Delegates to registered status unless overridden."""
+        return self.check_postal_registered_delivery_status(**kwargs)
+
+    def check_lre_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        """Placeholder for LRE status."""
+        return {
+            "status": "unknown",
+            "error_message": "check_lre_delivery_status() method not implemented",
+            "details": {},
+        }
+
+    def check_lre_qualified_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        """Delegates to LRE status unless overridden."""
+        return self.check_lre_delivery_status(**kwargs)
+
+    def check_ere_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        """Placeholder for ERE status."""
+        return {
+            "status": "unknown",
+            "error_message": "check_ere_delivery_status() method not implemented",
             "details": {},
         }
 
@@ -105,6 +218,26 @@ class BasePostalMixin:
         raise NotImplementedError(
             f"{self.name} must implement the send_postal() method"
         )
+
+    def send_postal_registered(self, **kwargs) -> bool:
+        """Registered mail defaults to postal handler."""
+        return self.send_postal(**kwargs)
+
+    def send_postal_signature(self, **kwargs) -> bool:
+        """Signature-required mail defaults to registered handler."""
+        return self.send_postal_registered(**kwargs)
+
+    def send_lre(self, **kwargs) -> bool:
+        """LRE sending placeholder."""
+        raise NotImplementedError(f"{self.name} must implement the send_lre() method")
+
+    def send_lre_qualified(self, **kwargs) -> bool:
+        """Qualified LRE defaults to LRE handler."""
+        return self.send_lre(**kwargs)
+
+    def send_ere(self, **kwargs) -> bool:
+        """Electronic registered email placeholder."""
+        raise NotImplementedError(f"{self.name} must implement the send_ere() method")
 
     def validate_postal_address(self, address: str) -> Dict[str, Any]:
         """Validate a postal address and return basic heuristics."""
@@ -130,48 +263,169 @@ class BasePostalMixin:
         weight_grams: int = 20,
         is_registered: bool = False,
         international: bool = False,
+        service: str = "postal",
     ) -> Dict[str, Any]:
         """Estimate the cost of a postal mail."""
-        if international:
-            base_cost = 1.96
-            delivery_days = 7
+        configured_price = self._get_postal_service_value(service, "price")
+        delivery_days = 2
+        if configured_price is not None:
+            base_cost = configured_price
         else:
-            if weight_grams <= 20:
-                base_cost = 1.29
-                delivery_days = 2
-            elif weight_grams <= 100:
+            if international:
                 base_cost = 1.96
-                delivery_days = 1
+                delivery_days = 7
             else:
-                base_cost = 3.15
-                delivery_days = 2
+                if weight_grams <= 20:
+                    base_cost = 1.29
+                    delivery_days = 2
+                elif weight_grams <= 100:
+                    base_cost = 1.96
+                    delivery_days = 1
+                else:
+                    base_cost = 3.15
+                    delivery_days = 2
 
-        if is_registered:
-            base_cost += 4.50
+            if is_registered:
+                base_cost += 4.50
 
         return {
             "cost": base_cost,
-            "format": "registered" if is_registered else "standard",
+            "format": service,
             "delivery_days": delivery_days,
             "weight_grams": weight_grams,
         }
+
+    def calculate_postal_registered_cost(
+        self, weight_grams: int = 20, international: bool = False
+    ) -> Dict[str, Any]:
+        """Registered postal cost helper."""
+        return self.calculate_postal_cost(
+            weight_grams=weight_grams,
+            international=international,
+            is_registered=True,
+            service="postal_registered",
+        )
+
+    def calculate_postal_signature_cost(
+        self, weight_grams: int = 20, international: bool = False
+    ) -> Dict[str, Any]:
+        """Signature-required postal cost helper."""
+        return self.calculate_postal_cost(
+            weight_grams=weight_grams,
+            international=international,
+            is_registered=True,
+            service="postal_signature",
+        )
+
+    def calculate_lre_cost(self) -> Dict[str, Any]:
+        """Cost helper for electronic registered letters."""
+        price = self._get_postal_service_value("lre", "price") or 0.0
+        return {"cost": price, "format": "lre"}
+
+    def calculate_lre_qualified_cost(self) -> Dict[str, Any]:
+        """Cost helper for qualified LRE."""
+        price = self._get_postal_service_value("lre_qualified", "price")
+        if price is None:
+            price = self._get_postal_service_value("lre", "price") or 0.0
+        return {"cost": price, "format": "lre_qualified"}
+
+    def calculate_ere_cost(self) -> Dict[str, Any]:
+        """Cost helper for electronic registered email."""
+        price = self._get_postal_service_value("ere", "price") or 0.0
+        return {"cost": price, "format": "ere"}
+
+    def _prepare_attachments_for_service(
+        self, attachments: List[Any], service: str
+    ) -> List[Dict[str, Any]]:
+        """Generic attachment preparation helper."""
+        prepared: List[Dict[str, Any]] = []
+
+        allowed_mimes = self._get_postal_service_value(
+            service, "allowed_attachment_mime_types"
+        )
+        allowed_formats = [
+            fmt.upper()
+            for fmt in (
+                self._get_postal_service_value(service, "allowed_page_formats") or []
+            )
+        ]
+        page_limit = self._get_postal_service_value(service, "page_limit")
+
+        for idx, attachment in enumerate(attachments):
+            mime_type = getattr(attachment, "mime_type", None)
+            if mime_type and allowed_mimes and mime_type not in allowed_mimes:
+                raise ValueError(
+                    f"{service} attachment {idx + 1}: MIME type '{mime_type}' not allowed."
+                )
+
+            page_format = getattr(attachment, "page_format", None)
+            if page_format and allowed_formats and page_format.upper() not in allowed_formats:
+                raise ValueError(
+                    f"{service} attachment {idx + 1}: Page format '{page_format}' not allowed."
+                )
+
+            page_count = getattr(attachment, "page_count", None)
+            if page_count is not None:
+                try:
+                    page_count_int = int(page_count)
+                    if page_limit and page_count_int > page_limit:
+                        raise ValueError(
+                            f"{service} attachment {idx + 1}: "
+                            f"{page_count_int} pages exceeds maximum of {page_limit} pages"
+                        )
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(
+                        f"{service} attachment {idx + 1}: Invalid page_count value"
+                    ) from exc
+
+            file_info = {
+                "filename": getattr(attachment, "filename", None),
+                "order": getattr(attachment, "order", None),
+                "mime_type": mime_type,
+                "url": getattr(attachment, "file_url", None),
+                "page_count": getattr(attachment, "page_count", None),
+                "page_format": page_format,
+                "service": service,
+            }
+            prepared.append(file_info)
+
+        return prepared
 
     def prepare_postal_attachments(
         self, attachments: List[Any]
     ) -> List[Dict[str, Any]]:
         """Prepare attachments for postal delivery."""
-        prepared: List[Dict[str, Any]] = []
+        return self._prepare_attachments_for_service(attachments, "postal")
 
-        for attachment in attachments:
-            file_info = {
-                "filename": getattr(attachment, "filename", None),
-                "order": getattr(attachment, "order", None),
-                "mime_type": getattr(attachment, "mime_type", None),
-                "url": getattr(attachment, "file_url", None),
-            }
-            prepared.append(file_info)
+    def prepare_postal_registered_attachments(
+        self, attachments: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """Prepare attachments for registered postal delivery."""
+        return self._prepare_attachments_for_service(attachments, "postal_registered")
 
-        return prepared
+    def prepare_postal_signature_attachments(
+        self, attachments: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """Prepare attachments for signature-required postal delivery."""
+        return self._prepare_attachments_for_service(attachments, "postal_signature")
+
+    def prepare_lre_attachments(
+        self, attachments: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """Prepare attachments for LRE delivery."""
+        return self._prepare_attachments_for_service(attachments, "lre")
+
+    def prepare_lre_qualified_attachments(
+        self, attachments: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """Prepare attachments for qualified LRE delivery."""
+        return self._prepare_attachments_for_service(attachments, "lre_qualified")
+
+    def prepare_ere_attachments(
+        self, attachments: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """Prepare attachments for ERE delivery."""
+        return self._prepare_attachments_for_service(attachments, "ere")
 
     def _check_attachment_mime_type(
         self, attachment: Any, idx: int
@@ -327,10 +581,60 @@ class BasePostalMixin:
         """Cancel a scheduled postal missive (override in subclasses)."""
         return False
 
+    def cancel_postal_registered(self, **kwargs) -> bool:
+        """Registered cancel defaults to postal cancel."""
+        return self.cancel_postal(**kwargs)
+
+    def cancel_postal_signature(self, **kwargs) -> bool:
+        """Signature cancel defaults to registered cancel."""
+        return self.cancel_postal_registered(**kwargs)
+
+    def cancel_lre(self, **kwargs) -> bool:
+        """Placeholder for LRE cancel."""
+        return False
+
+    def cancel_lre_qualified(self, **kwargs) -> bool:
+        """Qualified LRE cancel defaults to LRE cancel."""
+        return self.cancel_lre(**kwargs)
+
+    def cancel_ere(self, **kwargs) -> bool:
+        """Placeholder for ERE cancel."""
+        return False
+
     def validate_postal_webhook_signature(
         self, payload: Any, headers: Dict[str, str]
     ) -> Tuple[bool, str]:
         """Validate postal webhook signature. Override in subclasses."""
+        return True, ""
+
+    def validate_postal_registered_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Registered webhook signature defaults to postal."""
+        return self.validate_postal_webhook_signature(payload, headers)
+
+    def validate_postal_signature_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Signature webhook validation defaults to registered."""
+        return self.validate_postal_registered_webhook_signature(payload, headers)
+
+    def validate_lre_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Placeholder for LRE webhook signature validation."""
+        return True, ""
+
+    def validate_lre_qualified_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Qualified LRE webhook validation defaults to LRE."""
+        return self.validate_lre_webhook_signature(payload, headers)
+
+    def validate_ere_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Placeholder for ERE webhook signature validation."""
         return True, ""
 
     def handle_postal_webhook(
@@ -343,6 +647,62 @@ class BasePostalMixin:
             None,
         )
 
+    def handle_postal_registered_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Registered webhook defaults to postal handler."""
+        return self.handle_postal_webhook(payload, headers)
+
+    def handle_postal_signature_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Signature webhook defaults to registered handler."""
+        return self.handle_postal_registered_webhook(payload, headers)
+
+    def handle_lre_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Placeholder for LRE webhook handler."""
+        return False, "handle_lre_webhook() method not implemented", None
+
+    def handle_lre_qualified_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Qualified LRE webhook defaults to LRE handler."""
+        return self.handle_lre_webhook(payload, headers)
+
+    def handle_ere_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Placeholder for ERE webhook handler."""
+        return False, "handle_ere_webhook() method not implemented", None
+
     def extract_postal_missive_id(self, payload: Dict[str, Any]) -> Optional[str]:
         """Extract missive ID from postal webhook payload. Override in subclasses."""
+        return None
+
+    def extract_postal_registered_missive_id(
+        self, payload: Dict[str, Any]
+    ) -> Optional[str]:
+        """Registered missive ID defaults to postal extractor."""
+        return self.extract_postal_missive_id(payload)
+
+    def extract_postal_signature_missive_id(
+        self, payload: Dict[str, Any]
+    ) -> Optional[str]:
+        """Signature missive ID defaults to registered extractor."""
+        return self.extract_postal_registered_missive_id(payload)
+
+    def extract_lre_missive_id(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Placeholder for LRE missive ID extractor."""
+        return None
+
+    def extract_lre_qualified_missive_id(
+        self, payload: Dict[str, Any]
+    ) -> Optional[str]:
+        """Qualified LRE missive ID defaults to LRE extractor."""
+        return self.extract_lre_missive_id(payload)
+
+    def extract_ere_missive_id(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Placeholder for ERE missive ID extractor."""
         return None

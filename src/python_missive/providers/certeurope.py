@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from ..status import MissiveStatus
 from .base import BaseProvider
@@ -25,6 +25,18 @@ class CerteuropeProvider(BaseProvider):
     name = "certeurope"
     display_name = "Certeurope (LRE)"
     supported_types = ["LRE"]
+    lre_price = 5.5
+    lre_page_price_black_white = 0.0
+    lre_page_price_color = 0.0
+    lre_page_price_single_sided = 0.0
+    lre_page_price_duplex = 0.0
+    lre_allowed_attachment_mime_types: List[str] = ["application/pdf"]
+    lre_allowed_page_formats: List[str] = []
+    lre_envelope_limits: List[Dict[str, Any]] = []
+    lre_page_limit = 200
+    lre_color_printing_available = False
+    lre_duplex_printing_available = False
+    lre_archiving_duration = 3650
     config_keys = [
         "CERTEUROPE_API_KEY",
         "CERTEUROPE_API_SECRET",
@@ -35,7 +47,7 @@ class CerteuropeProvider(BaseProvider):
     site_url = "https://www.certeurope.fr/"
     description_text = "Electronic registered email with legal value (LRE)"
     # Geographic scope
-    lre_geo = ["Europe"]
+    lre_geographic_coverage = ["Europe"]
 
     def validate(self) -> tuple[bool, str]:
         """Validate that the recipient has an email and address"""
@@ -62,7 +74,7 @@ class CerteuropeProvider(BaseProvider):
 
         return True, ""
 
-    def send_postal(self, **kwargs) -> bool:
+    def send_lre(self, **kwargs) -> bool:
         """
         Send an LRE via Certeurope.
 
@@ -81,12 +93,24 @@ class CerteuropeProvider(BaseProvider):
 
         missive_id = getattr(self.missive, "id", "unknown")
         external_id = f"certeurope_sim_{missive_id}"
-        self._update_status(
-            MissiveStatus.SENT,
-            external_id=external_id,
-        )
+        self._update_status(MissiveStatus.SENT, external_id=external_id)
 
         return True
+
+    def get_lre_service_info(self) -> dict[str, Any]:
+        """Return the service descriptor for LRE deliveries."""
+        return {
+            "provider": self.name,
+            "services": ["lre"],
+            "geographic_coverage": self.lre_geographic_coverage,
+            "features": [
+                "Qualified electronic registered letters",
+                "Deposit and presentation certificates",
+                "Acknowledgement of receipt",
+                "Qualified timestamps",
+                "10-year archiving",
+            ],
+        }
 
     def check_status(self, external_id: Optional[str] = None) -> Optional[str]:
         """

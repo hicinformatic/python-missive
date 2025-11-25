@@ -12,10 +12,14 @@ class BaseSMSMixin:
     """SMS-specific functionality mixin."""
 
     sms_price: float = 0.50
+    sms_archiving_duration: int = 0  # Days SMS logs stay accessible
+    sms_geographic_coverage: list[str] | str = ["*"]
+    sms_geo = sms_geographic_coverage
     sms_character_limit: int = 160
     sms_unicode_character_limit: int = 70
     sms_config_fields: list[str] = [
         "sms_price",
+        "sms_archiving_duration",
         "sms_character_limit",
         "sms_unicode_character_limit",
     ]
@@ -26,11 +30,15 @@ class BaseSMSMixin:
             "credits": None,
             "credits_type": "count",
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": self.sms_archiving_duration,
+            },
             "warnings": [
                 "get_sms_service_info() method not implemented for this provider"
             ],
-            "details": {},
+            "details": {
+                "geographic_coverage": self.sms_geographic_coverage,
+            },
         }
 
     def check_sms_delivery_status(self, **kwargs) -> Dict[str, Any]:

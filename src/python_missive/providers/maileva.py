@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, cast
 
 from ..status import MissiveStatus
 from .base import BaseProvider
@@ -17,23 +17,133 @@ class MailevaProvider(BaseProvider):
     electronic postal mail services for businesses.
 
     Supports:
-    - Postal mail (simple, registered)
-    - Registered mail with signature
+    - Postal mail (simple, registered, signature)
+    - Qualified and standard electronic registered letters (LRE / ERE)
     - Document archiving
     """
 
     name = "Maileva"
     display_name = "Maileva"
-    supported_types = ["POSTAL", "POSTAL_REGISTERED", "LRE"]
-    services = [
-        "postal",  # Simple mail
-        "postal_registered",  # Registered mail
-        "postal_signature",  # Registered mail with signature
-        "archiving",  # Document archiving
+    supported_types = [
+        "POSTAL",
+        "POSTAL_REGISTERED",
+        "POSTAL_SIGNATURE",
+        "LRE",
+        "LRE_QUALIFIED",
+        "ERE",
     ]
+    _POSTAL_MIME_TYPES = [
+        "application/pdf",  # Adobe PDF
+        "application/msword",  # .doc
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+        "application/rtf",  # Rich Text Format
+        "text/plain",  # .txt
+        "application/vnd.ms-excel",  # .xls
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    ]
+    _POSTAL_ENVELOPE_LIMITS = [
+        {
+            "format": "C4 double-window",
+            "dimensions_mm": "210x300",
+            "max_sheets": 45,  # Includes address sheet and return envelope
+        },
+        {
+            "format": "DL simple/double-window",
+            "dimensions_mm": "114x229",
+            "max_sheets": 5,  # Includes address sheet and return envelope
+        },
+    ]
+    # Postal simple
+    postal_price = 1.435
+    postal_page_price_black_white = 0.33
+    postal_page_price_color = 0.58
+    postal_page_price_single_sided = 0.33
+    postal_page_price_duplex = 0.34
+    postal_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_allowed_page_formats = ["A4"]
+    postal_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_page_limit = 45
+    postal_color_printing_available = True
+    postal_duplex_printing_available = True
+    postal_archiving_duration = 0
+
+    # Postal recommandé
+    postal_registered_price = 5.36
+    postal_registered_page_price_black_white = 0.33
+    postal_registered_page_price_color = 0.58
+    postal_registered_page_price_single_sided = 0.33
+    postal_registered_page_price_duplex = 0.34
+    postal_registered_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_registered_allowed_page_formats = ["A4"]
+    postal_registered_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_registered_page_limit = 45
+    postal_registered_color_printing_available = True
+    postal_registered_duplex_printing_available = True
+    postal_registered_archiving_duration = 0
+
+    # Postal signature
+    postal_signature_price = 6.45
+    postal_signature_page_price_black_white = 0.33
+    postal_signature_page_price_color = 0.58
+    postal_signature_page_price_single_sided = 0.33
+    postal_signature_page_price_duplex = 0.34
+    postal_signature_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_signature_allowed_page_formats = ["A4"]
+    postal_signature_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_signature_page_limit = 45
+    postal_signature_color_printing_available = True
+    postal_signature_duplex_printing_available = True
+    postal_signature_archiving_duration = 0
+
+    # LRE standard
+    lre_price = 3.9
+    lre_page_price_black_white = 0.0
+    lre_page_price_color = 0.0
+    lre_page_price_single_sided = 0.0
+    lre_page_price_duplex = 0.0
+    lre_allowed_attachment_mime_types = ["application/pdf"]
+    lre_allowed_page_formats: list[str] = []
+    lre_envelope_limits: list[dict[str, Any]] = []
+    lre_page_limit = 200
+    lre_color_printing_available = False
+    lre_duplex_printing_available = False
+    lre_archiving_duration = 3650  # 10 years
+
+    # LRE qualifiée
+    lre_qualified_price = 6.2
+    lre_qualified_page_price_black_white = 0.0
+    lre_qualified_page_price_color = 0.0
+    lre_qualified_page_price_single_sided = 0.0
+    lre_qualified_page_price_duplex = 0.0
+    lre_qualified_allowed_attachment_mime_types = ["application/pdf"]
+    lre_qualified_allowed_page_formats: list[str] = []
+    lre_qualified_envelope_limits: list[dict[str, Any]] = []
+    lre_qualified_page_limit = 200
+    lre_qualified_color_printing_available = False
+    lre_qualified_duplex_printing_available = False
+    lre_qualified_archiving_duration = 3650
+
+    # Envoi recommandé électronique
+    ere_price = 2.8
+    ere_page_price_black_white = 0.0
+    ere_page_price_color = 0.0
+    ere_page_price_single_sided = 0.0
+    ere_page_price_duplex = 0.0
+    ere_allowed_attachment_mime_types = ["application/pdf", "application/xml"]
+    ere_allowed_page_formats: list[str] = []
+    ere_envelope_limits: list[dict[str, Any]] = []
+    ere_page_limit = 200
+    ere_color_printing_available = False
+    ere_duplex_printing_available = False
+    ere_archiving_duration = 1825  # 5 years
     # Geographic scopes per service family
-    postal_geo = ["FR"]  # Postal mail limited to France
-    lre_geo = ["FR"]  # LRE limited to France
+    postal_geographic_coverage = ["FR"]  # Postal mail limited to France
+    postal_registered_geographic_coverage = ["FR"]
+    postal_signature_geographic_coverage = ["FR"]
+    lre_geographic_coverage = ["FR"]  # LRE limited to France
+    lre_qualified_geographic_coverage = ["FR"]
+    ere_geographic_coverage = ["FR"]  # ERE limited to France (Docaposte trust scope)
+    email_geographic_coverage = ["FR"]
     config_keys = [
         "MAILEVA_CLIENTID",
         "MAILEVA_SECRET",
@@ -92,15 +202,23 @@ class MailevaProvider(BaseProvider):
                 timeout=10,
             )
             response.raise_for_status()
-            token_data = response.json()
-            return token_data.get("access_token")
+            token_data = cast(Dict[str, Any], response.json())
+            access_token = token_data.get("access_token")
+            return str(access_token) if isinstance(access_token, str) else None
 
         except Exception as e:
             self._create_event("error", f"Failed to get access token: {e}")
             return None
 
-    def send_postal(self, **kwargs) -> bool:
-        """Send postal mail via Maileva API."""
+    def _send_postal_service(
+        self,
+        *,
+        service: str,
+        is_registered: bool = False,
+        requires_signature: bool = False,
+        **kwargs,
+    ) -> bool:
+        """Internal helper to send any postal variation."""
         # Validation
         is_valid, error = self.validate()
         if not is_valid:
@@ -118,9 +236,6 @@ class MailevaProvider(BaseProvider):
                     MissiveStatus.FAILED, error_message="Failed to authenticate"
                 )
                 return False
-
-            is_registered = getattr(self.missive, "is_registered", False)
-            requires_signature = getattr(self.missive, "requires_signature", False)
 
             # TODO: Implement API call
             # api_base = self._get_api_base()
@@ -149,9 +264,9 @@ class MailevaProvider(BaseProvider):
             # Simulation for now
             external_id = f"mv_{getattr(self.missive, 'id', 'unknown')}"
 
-            letter_type = "registered" if is_registered else "simple"
-            if requires_signature:
-                letter_type += " with signature"
+            letter_type = service.replace("_", " ")
+            if not letter_type:
+                letter_type = "postal"
 
             self._update_status(
                 MissiveStatus.SENT, provider=self.name, external_id=external_id
@@ -164,6 +279,67 @@ class MailevaProvider(BaseProvider):
             self._update_status(MissiveStatus.FAILED, error_message=str(e))
             self._create_event("failed", str(e))
             return False
+
+    def send_postal(self, **kwargs) -> bool:
+        """Send simple postal mail via Maileva."""
+        return self._send_postal_service(service="postal", **kwargs)
+
+    def send_postal_registered(self, **kwargs) -> bool:
+        """Send registered postal mail via Maileva."""
+        return self._send_postal_service(
+            service="postal_registered", is_registered=True, **kwargs
+        )
+
+    def send_postal_signature(self, **kwargs) -> bool:
+        """Send registered mail with signature via Maileva."""
+        return self._send_postal_service(
+            service="postal_signature",
+            is_registered=True,
+            requires_signature=True,
+            **kwargs,
+        )
+
+    def _send_electronic_registered(
+        self, service: str, *, description: str
+    ) -> bool:
+        """Simulate electronic registered (LRE/ERE) sending."""
+        is_valid, error = self.validate()
+        if not is_valid:
+            self._update_status(MissiveStatus.FAILED, error_message=error)
+            return False
+
+        recipient_email = self._get_missive_value("recipient_email")
+        if not recipient_email:
+            self._update_status(
+                MissiveStatus.FAILED, error_message="Recipient email missing"
+            )
+            return False
+
+        try:
+            external_id = f"{service}_{getattr(self.missive, 'id', 'unknown')}"
+            self._update_status(
+                MissiveStatus.SENT, provider=self.name, external_id=external_id
+            )
+            self._create_event("sent", f"{description} sent via Maileva")
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            self._update_status(MissiveStatus.FAILED, error_message=str(exc))
+            self._create_event("failed", str(exc))
+            return False
+
+    def send_lre(self, **kwargs) -> bool:
+        """Send a standard LRE via Maileva."""
+        return self._send_electronic_registered("lre", description="LRE", **kwargs)
+
+    def send_lre_qualified(self, **kwargs) -> bool:
+        """Send a qualified LRE via Maileva."""
+        return self._send_electronic_registered(
+            "lre_qualified", description="Qualified LRE", **kwargs
+        )
+
+    def send_ere(self, **kwargs) -> bool:
+        """Send an electronic registered email via Maileva."""
+        return self._send_electronic_registered("ere", description="ERE", **kwargs)
 
     def validate_webhook_signature(
         self,
@@ -299,7 +475,7 @@ class MailevaProvider(BaseProvider):
         return {
             "status": "unknown",
             "is_available": None,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "money",
                 "remaining": None,
@@ -330,19 +506,62 @@ class MailevaProvider(BaseProvider):
             "services": ["postal", "postal_registered", "postal_signature"],
             "max_attachment_size_mb": 10.0,
             "max_attachment_size_bytes": 10 * 1024 * 1024,
-            "allowed_attachment_mime_types": [
-                "application/pdf",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "image/jpeg",
-                "image/png",
-            ],
-            "geographic_coverage": self.postal_geo,
+            "allowed_attachment_mime_types": self.postal_allowed_attachment_mime_types,
+            "geographic_coverage": self.postal_geographic_coverage,
             "features": [
                 "Color printing",
                 "Duplex printing",
                 "Optional address sheet",
                 "Document archiving",
             ],
+        }
+
+    def get_lre_service_info(self) -> Dict[str, Any]:
+        """Describe Maileva LRE (standard) features."""
+        return {
+            "provider": self.name,
+            "services": ["lre"],
+            "geographic_coverage": self.lre_geographic_coverage,
+            "features": [
+                "Electronic registered letter creation",
+                "Delivery tracking and proofs",
+                "Integration via Maileva API catalogue",
+            ],
+            "details": {
+                "catalog_url": "https://www.maileva.com/catalogue-api/envoi-et-suivi-ere-simples/",
+            },
+        }
+
+    def get_lre_qualified_service_info(self) -> Dict[str, Any]:
+        """Describe qualified LRE (Docaposte trust service) capabilities."""
+        return {
+            "provider": self.name,
+            "services": ["lre_qualified"],
+            "geographic_coverage": self.lre_qualified_geographic_coverage,
+            "features": [
+                "Qualified LRE generation (eIDAS-compliant)",
+                "Qualified electronic signature + timestamp",
+                "Full traceability with legal proofs",
+            ],
+            "details": {
+                "catalog_url": "https://www.maileva.com/catalogue-api/envoi-et-suivi-de-lre-qualifiees/",
+            },
+        }
+
+    def get_ere_service_info(self) -> Dict[str, Any]:
+        """Describe simple electronic registered email (ERE) capabilities."""
+        return {
+            "provider": self.name,
+            "services": ["ere"],
+            "geographic_coverage": self.ere_geographic_coverage,
+            "features": [
+                "Electronic registered email dispatch",
+                "Acknowledgement of receipt via Maileva",
+                "API monitoring and follow-up",
+            ],
+            "details": {
+                "catalog_url": "https://www.maileva.com/catalogue-api/envoi-et-suivi-ere-simples/",
+            },
         }
 
 

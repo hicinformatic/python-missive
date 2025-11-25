@@ -126,15 +126,16 @@ def test_create_event_invokes_logger() -> None:
     [
         ("EMAIL", False, False, "email"),
         ("EMAIL", True, False, "email_ar"),
+        ("EMAIL_MARKETING", False, False, "email_marketing"),
         ("POSTAL", False, False, "postal"),
-        ("POSTAL", True, False, "postal_registered"),
-        ("POSTAL", True, True, "postal_signature"),
         ("POSTAL_REGISTERED", False, False, "postal_registered"),
-        ("POSTAL_REGISTERED", False, True, "postal_signature"),
+        ("POSTAL_SIGNATURE", False, False, "postal_signature"),
         ("SMS", False, False, "sms"),
         ("BRANDED", False, False, DummyProvider.name.lower()),
         ("RCS", False, False, "rcs"),
         ("LRE", False, False, "lre"),
+        ("LRE_QUALIFIED", False, False, "lre_qualified"),
+        ("ERE", False, False, "ere"),
     ],
 )
 def test_detect_service_type(
@@ -152,8 +153,7 @@ def test_detect_service_type(
 
 def test_list_available_proofs_flags_supported_services() -> None:
     missive = DummyMissive()
-    missive.missive_type = "POSTAL"
-    missive.is_registered = True
+    missive.missive_type = "POSTAL_REGISTERED"
 
     provider = DummyProvider(missive=missive)
     proofs = provider.list_available_proofs()

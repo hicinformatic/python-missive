@@ -20,25 +20,105 @@ class LaPosteProvider(BaseProvider):
 
     name = "La Poste"
     display_name = "La Poste"
-    supported_types = ["POSTAL", "POSTAL_REGISTERED", "EMAIL", "LRE"]
-    services = [
-        "postal",  # Simple mail
-        "postal_registered",  # Registered R1
-        "postal_signature",  # Registered R2/R3 with signature
-        "email_ar",  # Email with electronic AR
-        "colissimo",  # Parcel (future extension)
+    supported_types = ["POSTAL", "POSTAL_REGISTERED", "POSTAL_SIGNATURE", "EMAIL", "LRE"]
+
+    _POSTAL_MIME_TYPES = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf",
+        "text/plain",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ]
+    _POSTAL_ENVELOPE_LIMITS = [
+        {
+            "format": "C4 double-window",
+            "dimensions_mm": "210x300",
+            "max_sheets": 45,
+        },
+        {
+            "format": "DL simple/double-window",
+            "dimensions_mm": "114x229",
+            "max_sheets": 5,
+        },
+    ]
+
+    # Postal (courrier simple)
+    postal_price = 1.722  # 1.435€ +20%
+    postal_page_price_black_white = 0.396
+    postal_page_price_color = 0.696
+    postal_page_price_single_sided = 0.396
+    postal_page_price_duplex = 0.408
+    postal_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_allowed_page_formats = ["A4"]
+    postal_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_page_limit = 45
+    postal_color_printing_available = True
+    postal_duplex_printing_available = True
+    postal_archiving_duration = 0
+
+    # Postal recommandé (R1)
+    postal_registered_price = 6.432  # 5.36€ +20%
+    postal_registered_page_price_black_white = 0.396
+    postal_registered_page_price_color = 0.696
+    postal_registered_page_price_single_sided = 0.396
+    postal_registered_page_price_duplex = 0.408
+    postal_registered_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_registered_allowed_page_formats = ["A4"]
+    postal_registered_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_registered_page_limit = 45
+    postal_registered_color_printing_available = True
+    postal_registered_duplex_printing_available = True
+    postal_registered_archiving_duration = 0
+
+    # Postal signature (R2/R3)
+    postal_signature_price = 7.74  # 6.45€ +20%
+    postal_signature_page_price_black_white = 0.396
+    postal_signature_page_price_color = 0.696
+    postal_signature_page_price_single_sided = 0.396
+    postal_signature_page_price_duplex = 0.408
+    postal_signature_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_signature_allowed_page_formats = ["A4"]
+    postal_signature_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_signature_page_limit = 45
+    postal_signature_color_printing_available = True
+    postal_signature_duplex_printing_available = True
+    postal_signature_archiving_duration = 0
+
+    # LRE (électronique)
+    lre_price = 4.68  # 3.9€ +20%
+    lre_page_price_black_white = 0.0
+    lre_page_price_color = 0.0
+    lre_page_price_single_sided = 0.0
+    lre_page_price_duplex = 0.0
+    lre_allowed_attachment_mime_types = ["application/pdf"]
+    lre_allowed_page_formats: list[str] = []
+    lre_envelope_limits: list[dict[str, Any]] = []
+    lre_page_limit = 200
+    lre_color_printing_available = False
+    lre_duplex_printing_available = False
+    lre_archiving_duration = 3650
     # Geographic scopes per service family
-    postal_geo = ["FR"]  # Postal mail limited to France
-    email_geo = "*"  # Email AR not geographically limited
-    lre_geo = "*"  # LRE not geographically limited
+    postal_geographic_coverage = ["FR"]  # Postal mail limited to France
+    postal_registered_geographic_coverage = ["FR"]
+    postal_signature_geographic_coverage = ["FR"]
+    email_geographic_coverage = ["*"]  # Email AR not geographically limited
+    lre_geographic_coverage = ["*"]  # LRE not geographically limited
     config_keys = ["LAPOSTE_API_KEY"]
     required_packages = ["requests"]
     site_url = "https://www.laposte.fr/"
     description_text = "Registered mail and AR email sending on French territory"
 
-    def send_postal(self, **kwargs) -> bool:
-        """Send postal mail via La Poste API"""
+    def _send_postal_service(
+        self,
+        *,
+        service: str,
+        is_registered: bool = False,
+        requires_signature: bool = False,
+        **kwargs,
+    ) -> bool:
+        """Common postal sending helper."""
         # Validation
         is_valid, error = self.validate()
         if not is_valid:
@@ -79,13 +159,7 @@ class LaPosteProvider(BaseProvider):
             # Simulation
             external_id = f"lp_{getattr(self.missive, 'id', 'unknown')}"
 
-            letter_type = (
-                "registered"
-                if getattr(self.missive, "is_registered", False)
-                else "simple"
-            )
-            if getattr(self.missive, "requires_signature", False):
-                letter_type += " with signature"
+            letter_type = service.replace("_", " ") or "postal"
 
             self._update_status(
                 MissiveStatus.SENT, provider=self.name, external_id=external_id
@@ -97,6 +171,44 @@ class LaPosteProvider(BaseProvider):
         except Exception as e:
             self._update_status(MissiveStatus.FAILED, error_message=str(e))
             self._create_event("failed", str(e))
+            return False
+
+    def send_postal(self, **kwargs) -> bool:
+        """Send postal mail via La Poste API"""
+        return self._send_postal_service(service="postal", **kwargs)
+
+    def send_postal_registered(self, **kwargs) -> bool:
+        """Send registered postal mail via La Poste."""
+        return self._send_postal_service(
+            service="postal_registered", is_registered=True, **kwargs
+        )
+
+    def send_postal_signature(self, **kwargs) -> bool:
+        """Send registered mail with signature via La Poste."""
+        return self._send_postal_service(
+            service="postal_signature",
+            is_registered=True,
+            requires_signature=True,
+            **kwargs,
+        )
+
+    def send_lre(self, **kwargs) -> bool:
+        """Send LRE via La Poste (placeholder)."""
+        is_valid, error = self.validate()
+        if not is_valid:
+            self._update_status(MissiveStatus.FAILED, error_message=error)
+            return False
+
+        try:
+            external_id = f"lp_lre_{getattr(self.missive, 'id', 'unknown')}"
+            self._update_status(
+                MissiveStatus.SENT, provider=self.name, external_id=external_id
+            )
+            self._create_event("sent", "LRE sent via La Poste")
+            return True
+        except Exception as exc:
+            self._update_status(MissiveStatus.FAILED, error_message=str(exc))
+            self._create_event("failed", str(exc))
             return False
 
     def send_email(self, **kwargs) -> bool:
@@ -271,6 +383,23 @@ class LaPosteProvider(BaseProvider):
 
         return proofs
 
+    def get_postal_service_info(self) -> Dict[str, Any]:
+        """Return detailed postal service capabilities."""
+        return {
+            "provider": self.name,
+            "services": ["postal", "postal_registered", "postal_signature"],
+            "max_attachment_size_mb": 10.0,
+            "max_attachment_size_bytes": 10 * 1024 * 1024,
+            "allowed_attachment_mime_types": self.postal_allowed_attachment_mime_types,
+            "geographic_coverage": self.postal_geographic_coverage,
+            "features": [
+                "Color printing",
+                "Duplex printing (par défaut)",
+                "Optional address sheet",
+                "Electronic acknowledgement of receipt",
+            ],
+        }
+
     def get_service_status(self) -> Dict:
         """
         Gets La Poste status and credits.
@@ -286,7 +415,7 @@ class LaPosteProvider(BaseProvider):
         return {
             "status": "unknown",
             "is_available": None,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "money",
                 "remaining": None,

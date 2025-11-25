@@ -14,7 +14,6 @@ class TelegramProvider(BaseProvider):
     name = "telegram"
     display_name = "Telegram"
     supported_types = ["BRANDED"]
-    services = ["branded"]
     brands = ["telegram"]
     config_keys = ["TELEGRAM_BOT_TOKEN"]
     required_packages = ["python-telegram-bot"]

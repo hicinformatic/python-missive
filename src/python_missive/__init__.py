@@ -7,9 +7,10 @@ from typing import Any, Dict, Optional, Sequence, Union
 from .address_backends import (BaseAddressBackend, GoogleMapsAddressBackend,
                                HereAddressBackend, MapboxAddressBackend,
                                NominatimAddressBackend, PhotonAddressBackend)
-from .helpers import (format_phone_international,
+from .helpers import (describe_address_backends, format_phone_international,
+                      get_address_backend_by_attribute,
                       get_address_backends_from_config,
-                      get_address_from_backends)
+                      get_address_from_backends, get_provider_by_attribute)
 from .missive import Missive
 from .providers.base.common import BaseProviderCommon
 from .sender import MissiveSender
@@ -24,6 +25,9 @@ __all__ = [
     "format_phone_international",
     "get_address_backends_from_config",
     "get_address_from_backends",
+    "get_address_backend_by_attribute",
+    "describe_address_backends",
+    "get_provider_by_attribute",
     "BaseAddressBackend",
     "GoogleMapsAddressBackend",
     "HereAddressBackend",

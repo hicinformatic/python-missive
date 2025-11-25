@@ -49,20 +49,10 @@ class MissiveSender:
     # Geo helpers
     # -------------------------------
     @staticmethod
-    def _family_from_type(mtype: str) -> str:
-        mt = (mtype or "").upper()
-        return {
-            "POSTAL": "postal",
-            "POSTAL_REGISTERED": "postal",
-            "EMAIL": "email",
-            "SMS": "sms",
-            "RCS": "rcs",
-            "PUSH_NOTIFICATION": "push_notification",
-            "NOTIFICATION": "notification",
-            "VOICE_CALL": "voice_call",
-            "BRANDED": "branded",
-            "LRE": "lre",
-        }.get(mt, mt.lower())
+    def _geo_attr_for_type(mtype: str) -> str:
+        """Return the geographic coverage attribute name for a missive type."""
+        base = (mtype or "").strip().lower().replace(" ", "_")
+        return f"{base}_geographic_coverage"
 
     @staticmethod
     def _get_destination(m: Missive) -> Dict[str, Optional[str]]:
@@ -167,7 +157,7 @@ class MissiveSender:
         provider_path: str,
         *,
         missive: Missive,
-        family: str,
+        geo_attr: str,
         destination: Dict[str, Optional[str]],
         provider_kwargs: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -184,8 +174,10 @@ class MissiveSender:
             }
 
         # Geo check
-        geo_attr = f"{family}_geo"
-        geo_value = getattr(provider_class, geo_attr, "*")
+        geo_value = getattr(provider_class, geo_attr, None)
+        if geo_value is None:
+            legacy_attr = geo_attr.replace("_geographic_coverage", "_geo")
+            geo_value = getattr(provider_class, legacy_attr, "*")
         if not self._geo_allows(
             geo_value,
             country=destination["country"],
@@ -272,14 +264,14 @@ class MissiveSender:
         last_error = None
         attempts = []
 
-        family = self._family_from_type(missive.missive_type)
         destination = self._get_destination(missive)
+        geo_attr = self._geo_attr_for_type(missive.missive_type)
 
         for index, provider_path in enumerate(provider_paths, 1):
             result = self._attempt_send(
                 provider_path,
                 missive=missive,
-                family=family,
+                geo_attr=geo_attr,
                 destination=destination,
                 provider_kwargs=provider_kwargs,
             )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from .base import BaseAddressBackend
 
@@ -85,7 +85,7 @@ class NominatimAddressBackend(BaseAddressBackend):
 
         url = f"{self._base_url}{endpoint}"
 
-        request_params = {
+        request_params: Dict[str, Any] = {
             "format": "json",
             "addressdetails": 1,
             "limit": 5,
@@ -100,7 +100,7 @@ class NominatimAddressBackend(BaseAddressBackend):
                 url, params=request_params, headers=headers, timeout=10
             )
             response.raise_for_status()
-            return response.json()
+            return cast(Dict[str, Any], response.json())
         except requests.exceptions.HTTPError as e:
             try:
                 error_data = response.json()

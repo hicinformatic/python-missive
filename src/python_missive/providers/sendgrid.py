@@ -17,10 +17,20 @@ class SendGridProvider(BaseProvider):
 
     name = "SendGrid"
     display_name = "SendGrid"
-    supported_types = ["EMAIL"]
-    services = ["email", "email_transactional", "email_marketing"]
-    # Geographic scope
-    email_geo = "*"
+    supported_types = ["EMAIL", "EMAIL_MARKETING"]
+    # Geographic scope and pricing
+    email_geographic_coverage = ["*"]
+    email_geo = email_geographic_coverage
+    email_marketing_geographic_coverage = ["*"]
+    email_marketing_geo = email_marketing_geographic_coverage
+    email_price = 0.9  # Similar to Mailgun baseline
+    email_marketing_price = 0.15  # Marketing credits slightly higher
+    email_marketing_max_attachment_size_mb = 10
+    email_marketing_allowed_attachment_mime_types = [
+        "text/html",
+        "image/jpeg",
+        "image/png",
+    ]
     config_keys = ["SENDGRID_API_KEY"]
     required_packages = ["sendgrid"]
     site_url = "https://sendgrid.com/"
@@ -53,6 +63,10 @@ class SendGridProvider(BaseProvider):
 
         except Exception as e:
             return self._handle_send_error(e)
+
+    def send_email_marketing(self, **kwargs) -> bool:
+        """Marketing campaigns follow the transactional send path."""
+        return self.send_email(**kwargs)
 
     def validate_webhook_signature(
         self,
@@ -89,6 +103,19 @@ class SendGridProvider(BaseProvider):
             return True, ""
         return False, "Signature does not match"
 
+    def validate_email_marketing_webhook_signature(
+        self,
+        payload: Any,
+        headers: Dict[str, str],
+        *,
+        missive_type: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Tuple[bool, str]:
+        """Marketing webhooks reuse the same verification."""
+        return self.validate_webhook_signature(
+            payload, headers, missive_type="EMAIL_MARKETING", **kwargs
+        )
+
     def extract_email_missive_id(self, payload: Any) -> Optional[str]:
         """Extract missive ID from SendGrid webhook."""
         # SendGrid sends an array of events
@@ -106,6 +133,10 @@ class SendGridProvider(BaseProvider):
             return str(result) if result else None
         return None
 
+    def extract_email_marketing_missive_id(self, payload: Any) -> Optional[str]:
+        """Reuse transactional ID extraction."""
+        return self.extract_email_missive_id(payload)
+
     def extract_event_type(self, payload: Any) -> str:
         """Extract event type from SendGrid webhook."""
         if isinstance(payload, list) and len(payload) > 0:
@@ -117,6 +148,12 @@ class SendGridProvider(BaseProvider):
             result = payload.get("event", "unknown")
             return str(result) if result else "unknown"
         return "unknown"
+
+    def handle_email_marketing_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Delegate marketing webhook handling to transactional handler."""
+        return self.handle_email_webhook(payload, headers)
 
     def get_service_status(self) -> Dict:
         """
@@ -130,7 +167,7 @@ class SendGridProvider(BaseProvider):
         return {
             "status": "unknown",
             "is_available": None,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "emails",
                 "remaining": None,

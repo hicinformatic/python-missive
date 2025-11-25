@@ -73,6 +73,28 @@ class BaseProviderCommon:
         """Return True if the provider handles the given missive type."""
         return missive_type in self.supported_types
 
+    def _get_services(self) -> list[str]:
+        """
+        Return the list of declared services, falling back to supported types.
+
+        Providers can override `services` to expose finer-grained capabilities
+        (e.g. marketing vs transactional email). When not set, we derive the list
+        from supported types to avoid duplication requirements.
+        """
+        declared = list(self.services or [])
+        if declared:
+            return declared
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for missive_type in self.supported_types:
+            token = str(missive_type).strip().lower()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            normalized.append(token)
+        return normalized
+
     def configure(
         self, config: Dict[str, Any], *, replace: bool = False
     ) -> "BaseProviderCommon":
@@ -95,7 +117,7 @@ class BaseProviderCommon:
 
     def has_service(self, service: str) -> bool:
         """Return True if the provider exposes the given service name."""
-        return service in self.services
+        return service in self._get_services()
 
     def check_package(self, package_name: str) -> bool:
         """Check if a required package is installed.
@@ -249,35 +271,31 @@ class BaseProviderCommon:
 
     def _detect_service_type(self) -> str:
         """Infer service type from the missive object."""
-        if not self.missive or not hasattr(self.missive, "missive_type"):
+        missive_type = str(getattr(self.missive, "missive_type", "")).strip()
+        if not missive_type:
             return "unknown"
 
-        missive_type = getattr(self.missive, "missive_type")
+        normalized = missive_type.upper()
 
-        if missive_type == "LRE":
-            return "lre"
-        if missive_type == "POSTAL":
-            if getattr(self.missive, "is_registered", False):
-                if getattr(self.missive, "requires_signature", False):
-                    return "postal_signature"
-                return "postal_registered"
-            return "postal"
-        if missive_type == "POSTAL_REGISTERED":
-            if getattr(self.missive, "requires_signature", False):
-                return "postal_signature"
-            return "postal_registered"
-        if missive_type == "EMAIL":
-            if getattr(self.missive, "is_registered", False):
-                return "email_ar"
-            return "email"
-        if missive_type == "SMS":
-            return "sms"
-        if missive_type == "BRANDED":
+        if normalized.startswith("POSTAL"):
+            return self._resolve_postal_service_variant(normalized)
+
+        if normalized == "EMAIL":
+            return "email_ar" if getattr(self.missive, "is_registered", False) else "email"
+
+        if normalized == "BRANDED":
             return self.name.lower()
-        if missive_type == "RCS":
-            return "rcs"
 
-        return str(missive_type).lower()
+        return normalized.lower()
+
+    def _resolve_postal_service_variant(self, type_token: str) -> str:
+        """Map a postal missive type to its service identifier."""
+        mapping = {
+            "POSTAL": "postal",
+            "POSTAL_REGISTERED": "postal_registered",
+            "POSTAL_SIGNATURE": "postal_signature",
+        }
+        return mapping.get(type_token, type_token.lower())
 
     def list_available_proofs(self) -> Dict[str, bool]:
         """Return proof availability keyed by service type."""
@@ -304,7 +322,7 @@ class BaseProviderCommon:
         return {
             "status": "unknown",
             "is_available": None,
-            "services": list(self.services),
+            "services": self._get_services(),
             "credits": {
                 "type": "unknown",
                 "remaining": None,
@@ -343,8 +361,16 @@ class BaseProviderCommon:
         for family in sorted(families):
             key = f"{family}_geo"
             if key not in self._raw_config:
-                missing_geo.append(key)
-                continue
+                attr_name = f"{family}_geographic_coverage"
+                fallback_attr = f"{family}_geo"
+                attr_value = getattr(self, attr_name, None)
+                if attr_value is None:
+                    attr_value = getattr(self, fallback_attr, None)
+                if attr_value is None:
+                    missing_geo.append(key)
+                    continue
+                # If provided via attribute, inject into config for downstream logic
+                self._raw_config[key] = attr_value
             value = self._raw_config.get(key)
             ok, msg = self._validate_geo_config(value)
             if not ok:
@@ -539,40 +565,15 @@ class BaseProviderCommon:
     def _detect_service_families(self) -> set[str]:
         """Map declared services to canonical families for geo config."""
         families: set[str] = set()
-        mapping = {
-            "postal": "postal",
-            "postal_registered": "postal",
-            "postal_signature": "postal",
-            "email": "email",
-            "email_ar": "email",
-            "sms": "sms",
-            "rcs": "rcs",
-            "push_notification": "push",
-            "notification": "notification",
-            "voice_call": "voice",
-            "branded": "branded",
-            "lre": "lre",
-        }
-        for service in self.services:
-            fam = mapping.get(service.strip().lower())
-            if fam:
-                families.add(fam)
-        # Also consider supported_types (e.g., POSTAL implies postal)
-        type_map = {
-            "POSTAL": "postal",
-            "EMAIL": "email",
-            "SMS": "sms",
-            "RCS": "rcs",
-            "PUSH_NOTIFICATION": "push",
-            "NOTIFICATION": "notification",
-            "VOICE_CALL": "voice",
-            "BRANDED": "branded",
-            "LRE": "lre",
-        }
+        for service in self._get_services():
+            normalized = service.strip().lower()
+            if normalized:
+                families.add(normalized)
+        # Also consider supported_types (e.g., POSTAL_REGISTERED implies same family)
         for t in self.supported_types:
-            fam = type_map.get(str(t).upper())
-            if fam:
-                families.add(fam)
+            normalized = str(t).strip().lower()
+            if normalized:
+                families.add(normalized)
         return families
 
     @staticmethod

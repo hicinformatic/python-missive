@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from .base import BaseAddressBackend
 
@@ -69,14 +69,14 @@ class MapboxAddressBackend(BaseAddressBackend):
         base_url = "https://api.mapbox.com"
         url = f"{base_url}{endpoint}"
 
-        request_params = {"access_token": self._access_token}
+        request_params: Dict[str, Any] = {"access_token": self._access_token}
         if params:
             request_params.update(params)
 
         try:
             response = requests.get(url, params=request_params, timeout=10)
             response.raise_for_status()
-            return response.json()
+            return cast(Dict[str, Any], response.json())
         except requests.exceptions.HTTPError as e:
             try:
                 error_data = response.json()
@@ -122,7 +122,7 @@ class MapboxAddressBackend(BaseAddressBackend):
         import urllib.parse
 
         encoded_query = urllib.parse.quote(query)
-        params = {"limit": 5}
+        params: Dict[str, Any] = {"limit": 5}
         if country:
             params["country"] = country
 
@@ -215,7 +215,7 @@ class MapboxAddressBackend(BaseAddressBackend):
         import urllib.parse
 
         encoded_query = urllib.parse.quote(query)
-        params = {"limit": 1}
+        params: Dict[str, Any] = {"limit": 1}
         if country:
             params["country"] = country
 
@@ -273,7 +273,7 @@ class MapboxAddressBackend(BaseAddressBackend):
         self, latitude: float, longitude: float, **kwargs: Any
     ) -> Dict[str, Any]:
         """Reverse geocode coordinates to an address using Mapbox."""
-        params = {"limit": 1}
+        params: Dict[str, Any] = {"limit": 1}
         if "language" in kwargs:
             params["language"] = kwargs["language"]
 

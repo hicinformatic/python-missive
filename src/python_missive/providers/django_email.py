@@ -16,9 +16,11 @@ class DjangoEmailProvider(BaseProvider):
 
     name = "django_email"
     display_name = "Django Email Backend"
-    supported_types = ["EMAIL"]
-    services = ["email"]
-    email_geo: Any = "*"
+    supported_types = ["EMAIL", "EMAIL_MARKETING"]
+    email_geographic_coverage: List[str] | str = ["*"]
+    email_geo: Any = email_geographic_coverage
+    email_marketing_geographic_coverage: List[str] | str = ["*"]
+    email_marketing_geo = email_marketing_geographic_coverage
     description_text = (
         "Lightweight email provider delegating to SMTP or local file delivery. "
         "Mimics Django's console/backend behaviour without importing Django."
@@ -85,6 +87,10 @@ class DjangoEmailProvider(BaseProvider):
         self._create_event("sent", f"Email dispatched via {delivery_target}")
         return True
 
+    def send_email_marketing(self, **kwargs: Any) -> bool:
+        """Marketing emails reuse the same simple pipeline."""
+        return self.send_email(**kwargs)
+
     def get_email_service_info(self) -> Dict[str, Any]:
         host = self._raw_config.get("EMAIL_HOST") or "localhost"
         return {
@@ -102,13 +108,16 @@ class DjangoEmailProvider(BaseProvider):
             },
         }
 
+    def get_email_marketing_service_info(self) -> Dict[str, Any]:
+        return self.get_email_service_info()
+
     def get_service_status(self) -> Dict[str, Any]:
         """Return lightweight status for monitoring screens."""
         backend = "smtp" if self._raw_config.get("EMAIL_HOST") else "file"
         return {
             "status": "operational",
             "is_available": True,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "unlimited",
                 "remaining": None,

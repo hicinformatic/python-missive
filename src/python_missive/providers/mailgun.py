@@ -15,10 +15,20 @@ class MailgunProvider(BaseProvider):
 
     name = "Mailgun"
     display_name = "Mailgun"
-    supported_types = ["EMAIL"]
-    services = ["email", "email_validation", "email_routing"]
-    # Geographic scope
-    email_geo = "*"
+    supported_types = ["EMAIL", "EMAIL_MARKETING"]
+    # Geographic scope and pricing
+    email_geographic_coverage = ["*"]
+    email_geo = email_geographic_coverage
+    email_marketing_geographic_coverage = ["*"]
+    email_marketing_geo = email_marketing_geographic_coverage
+    email_price = 0.90  # $0.80/100 emails ~ €0.009 -> scaled to €0.009, rounding
+    email_marketing_price = 0.12  # Marketing campaigns at slightly higher cost
+    email_marketing_max_attachment_size_mb = 10
+    email_marketing_allowed_attachment_mime_types = [
+        "text/html",
+        "image/jpeg",
+        "image/png",
+    ]
     config_keys = ["MAILGUN_API_KEY", "MAILGUN_DOMAIN"]
     required_packages = ["mailgun"]
     site_url = "https://www.mailgun.com/"
@@ -70,6 +80,10 @@ class MailgunProvider(BaseProvider):
 
         except Exception as e:
             return self._handle_send_error(e)
+
+    def send_email_marketing(self, **kwargs) -> bool:
+        """Reuse transactional pipeline for marketing blasts."""
+        return self.send_email(**kwargs)
 
     def validate_webhook_signature(
         self,
@@ -131,7 +145,7 @@ class MailgunProvider(BaseProvider):
         return {
             "status": "unknown",
             "is_available": None,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "emails",
                 "remaining": None,

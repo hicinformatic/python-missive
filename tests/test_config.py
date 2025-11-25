@@ -39,6 +39,20 @@ MISSIVE_CONFIG_PROVIDERS = {
         "MAILGUN_API_KEY": _get_env_or_default("MAILGUN_API_KEY", "test_key"),
         "MAILGUN_DOMAIN": _get_env_or_default("MAILGUN_DOMAIN", "test.example.com"),
     },
+    "python_missive.providers.smtp.SMTPProvider": {
+        "SMTP_HOST": _get_env_or_default("SMTP_HOST", "localhost"),
+        "SMTP_PORT": int(_get_env_or_default("SMTP_PORT", "1025")),
+        "SMTP_USERNAME": _get_env_or_default("SMTP_USERNAME", ""),
+        "SMTP_PASSWORD": _get_env_or_default("SMTP_PASSWORD", ""),
+        "SMTP_USE_TLS": _get_env_or_default("SMTP_USE_TLS", "false"),
+        "SMTP_USE_SSL": _get_env_or_default("SMTP_USE_SSL", "false"),
+        "SMTP_TIMEOUT_SECONDS": float(
+            _get_env_or_default("SMTP_TIMEOUT_SECONDS", "5.0")
+        ),
+        "DEFAULT_FROM_EMAIL": _get_env_or_default(
+            "SMTP_DEFAULT_FROM_EMAIL", "noreply@example.com"
+        ),
+    },
     "python_missive.providers.ses.SESProvider": {
         "AWS_ACCESS_KEY_ID": _get_env_or_default("AWS_ACCESS_KEY_ID", "test_key"),
         "AWS_SECRET_ACCESS_KEY": _get_env_or_default(

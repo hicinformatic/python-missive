@@ -25,7 +25,6 @@ class APNProvider(BaseProvider):
     name = "apn"
     display_name = "Apple Push Notification"
     supported_types = ["PUSH_NOTIFICATION"]
-    services = ["push_notification"]
     # Geographic scope
     push_notification_geo = "*"
     config_keys = ["APN_CERTIFICATE_PATH", "APN_KEY_ID", "APN_TEAM_ID"]

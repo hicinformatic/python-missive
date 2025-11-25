@@ -13,7 +13,11 @@ class BaseMonitoringMixin:
         clock_fn = getattr(self, "_clock", None)
         last_check = clock_fn() if callable(clock_fn) else None
 
-        services = getattr(self, "services", [])
+        services_getter = getattr(self, "_get_services", None)
+        if callable(services_getter):
+            services = services_getter()
+        else:
+            services = list(getattr(self, "services", []))
 
         return {
             "status": "unknown",

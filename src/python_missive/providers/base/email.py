@@ -13,6 +13,8 @@ class BaseEmailMixin:
 
     # Default limit for email attachments (in MB)
     email_max_attachment_size_mb: int = 25
+    email_geographic_coverage: list[str] | str = ["*"]
+    email_geo = email_geographic_coverage
 
     # Allowed MIME types for email attachments (empty list = all types allowed)
     email_allowed_attachment_mime_types: list[str] = [
@@ -41,10 +43,26 @@ class BaseEmailMixin:
     ]
 
     email_price: float = 0.10
+    email_archiving_duration: int = 0  # Days emails remain retrievable
     email_config_fields: list[str] = [
         "email_price",
+        "email_archiving_duration",
         "email_max_attachment_size_mb",
         "email_allowed_attachment_mime_types",
+    ]
+    email_marketing_price: float = 0.12
+    email_marketing_archiving_duration: int = 0
+    email_marketing_max_attachment_size_mb: int = 25
+    email_marketing_allowed_attachment_mime_types: list[str] = list(
+        email_allowed_attachment_mime_types
+    )
+    email_marketing_geographic_coverage: list[str] | str = ["*"]
+    email_marketing_geo = email_marketing_geographic_coverage
+    email_marketing_config_fields: list[str] = [
+        "email_marketing_price",
+        "email_marketing_archiving_duration",
+        "email_marketing_max_attachment_size_mb",
+        "email_marketing_allowed_attachment_mime_types",
     ]
 
     @property
@@ -62,19 +80,48 @@ class BaseEmailMixin:
         """Return max attachment size in bytes."""
         return int(self.email_max_attachment_size_mb * 1024 * 1024)
 
-    def get_email_service_info(self) -> Dict[str, Any]:
-        """Return email service information. Override in subclasses."""
+    def _get_email_service_value(self, service: str, field: str) -> Any:
+        """Return configuration value for a given email service variant."""
+        attr_name = f"{service}_{field}"
+        if hasattr(self, attr_name):
+            value = getattr(self, attr_name)
+            if value is not None:
+                return value
+        if service != "email":
+            fallback = f"email_{field}"
+            if hasattr(self, fallback):
+                return getattr(self, fallback)
+        return None
+
+    def _build_email_service_info(self, service: str) -> Dict[str, Any]:
+        """Construct a default service information payload."""
+        archiving_duration = self._get_email_service_value(service, "archiving_duration")
+        coverage = self._get_email_service_value(service, "geographic_coverage") or [
+            "*"
+        ]
         return {
             "credits": None,
             "credits_type": "unlimited",
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": archiving_duration,
+            },
             "warnings": [
-                "get_email_service_info() method not implemented for this provider"
+                f"get_{service}_service_info() method not implemented for this provider"
             ],
             "reputation": {},
-            "details": {},
+            "details": {
+                "geographic_coverage": coverage,
+            },
         }
+
+    def get_email_service_info(self) -> Dict[str, Any]:
+        """Return email service information. Override in subclasses."""
+        return self._build_email_service_info("email")
+
+    def get_email_marketing_service_info(self) -> Dict[str, Any]:
+        """Return marketing email service information."""
+        return self._build_email_service_info("email_marketing")
 
     def check_email_delivery_status(self, **kwargs) -> Dict[str, Any]:
         """Check email delivery status. Override in subclasses."""
@@ -91,6 +138,21 @@ class BaseEmailMixin:
             "details": {},
         }
 
+    def check_email_marketing_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        """Check marketing email delivery status."""
+        return {
+            "status": "unknown",
+            "delivered_at": None,
+            "opened_at": None,
+            "clicked_at": None,
+            "opens_count": 0,
+            "clicks_count": 0,
+            "bounce_type": None,
+            "error_code": None,
+            "error_message": "check_email_marketing_delivery_status() method not implemented for this provider",
+            "details": {},
+        }
+
     def send_email(self, **kwargs) -> bool:
         """Send email. Override in subclasses."""
         recipient_email = self._get_missive_value("get_recipient_email")
@@ -104,6 +166,12 @@ class BaseEmailMixin:
             return False
 
         raise NotImplementedError(f"{self.name} must implement the send_email() method")
+
+    def send_email_marketing(self, **kwargs) -> bool:
+        """Send marketing email. Override in subclasses."""
+        raise NotImplementedError(
+            f"{self.name} must implement the send_email_marketing() method"
+        )
 
     def validate_email(self, email: str) -> Dict[str, Any]:
         """Validate email and assess delivery risk."""
@@ -354,6 +422,10 @@ class BaseEmailMixin:
         """Cancel a scheduled email (override in subclasses)."""
         return False
 
+    def cancel_email_marketing(self, **kwargs) -> bool:
+        """Cancel scheduled marketing email."""
+        return False
+
     def calculate_email_delivery_risk(
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
@@ -411,10 +483,22 @@ class BaseEmailMixin:
             "should_send": risk_score < 70,
         }
 
+    def calculate_email_marketing_delivery_risk(
+        self, missive: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Calculate delivery risk for marketing emails."""
+        return self.calculate_email_delivery_risk(missive)
+
     def validate_email_webhook_signature(
         self, payload: Any, headers: Dict[str, str]
     ) -> Tuple[bool, str]:
         """Validate email webhook signature. Override in subclasses."""
+        return True, ""
+
+    def validate_email_marketing_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Validate marketing email webhook signature."""
         return True, ""
 
     def handle_email_webhook(
@@ -427,6 +511,22 @@ class BaseEmailMixin:
             None,
         )
 
+    def handle_email_marketing_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Process marketing email webhook payload."""
+        return (
+            False,
+            "handle_email_marketing_webhook() method not implemented for this provider",
+            None,
+        )
+
     def extract_email_missive_id(self, payload: Dict[str, Any]) -> Optional[str]:
         """Extract missive ID from email webhook payload. Override in subclasses."""
+        return None
+
+    def extract_email_marketing_missive_id(
+        self, payload: Dict[str, Any]
+    ) -> Optional[str]:
+        """Extract missive ID from marketing email webhook payload."""
         return None

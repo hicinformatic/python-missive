@@ -19,15 +19,7 @@ class BrevoProvider(BaseProvider):
 
     name = "Brevo"
     display_name = "Brevo"
-    supported_types = ["EMAIL", "SMS"]
-    services = [
-        "email",
-        "email_transactional",
-        "email_marketing",
-        "sms",
-        "contacts",
-        "automation",
-    ]
+    supported_types = ["EMAIL", "EMAIL_MARKETING", "SMS"]
     config_keys = ["BREVO_API_KEY", "BREVO_SMS_SENDER", "BREVO_DEFAULT_FROM_EMAIL"]
     required_packages = ["sib-api-v3-sdk"]
     site_url = "https://www.brevo.com/"
@@ -35,8 +27,18 @@ class BrevoProvider(BaseProvider):
     documentation_url = "https://developers.brevo.com/"
     description_text = "Complete CRM platform (Email, SMS, Marketing automation)"
     # Geographic scopes
-    email_geo = "*"
-    sms_geo = "*"
+    email_geographic_coverage = ["*"]
+    email_geo = email_geographic_coverage
+    email_marketing_geographic_coverage = ["*"]
+    email_marketing_geo = email_marketing_geographic_coverage
+    sms_geographic_coverage = ["*"]
+    sms_geo = sms_geographic_coverage
+    # Pricing and limits
+    email_price = 0.08  # transactional email unit cost (default Brevo Essentials)
+    email_marketing_price = 0.05  # cost attributed to marketing sends
+    email_marketing_max_attachment_size_mb = 10  # lighter assets for campaigns
+    email_marketing_allowed_attachment_mime_types = ["text/html", "image/jpeg", "image/png"]
+    sms_price = 0.07  # average SMS HT within Europe zone
 
     # ------------------------------------------------------------------
     # Common helpers
@@ -67,6 +69,24 @@ class BrevoProvider(BaseProvider):
         self._create_event("sent", "Email sent via Brevo")
         return True
 
+    def send_email_marketing(self, **kwargs) -> bool:
+        """Reuse transactional pipeline for marketing campaigns."""
+        risk = self.calculate_email_marketing_delivery_risk()
+        if not risk.get("should_send", True):
+            recommendations = risk.get("recommendations", [])
+            error_message = next(
+                (rec for rec in recommendations if rec), "Email marketing blocked"
+            )
+            self._update_status(MissiveStatus.FAILED, error_message=error_message)
+            return False
+
+        external_id = f"brevo_email_marketing_{getattr(self.missive, 'id', 'unknown')}"
+        self._update_status(
+            MissiveStatus.SENT, provider=self.name, external_id=external_id
+        )
+        self._create_event("sent", "Email marketing campaign sent via Brevo")
+        return True
+
     def get_email_service_info(self) -> Dict[str, Any]:
         base = super().get_email_service_info()
         base.update(
@@ -77,6 +97,26 @@ class BrevoProvider(BaseProvider):
             }
         )
         return base
+
+    def get_email_marketing_service_info(self) -> Dict[str, Any]:
+        base = super().get_email_marketing_service_info()
+        base.update(
+            {
+                "service": "brevo_email_marketing",
+                "warnings": base.get("warnings", []),
+                "details": {
+                    "supports_marketing": True,
+                    "geographic_coverage": self.email_marketing_geographic_coverage,
+                },
+            }
+        )
+        return base
+
+    def check_email_marketing_delivery_status(self, **kwargs) -> Dict[str, Any]:
+        return self.check_email_delivery_status(**kwargs)
+
+    def cancel_email_marketing(self, **kwargs) -> bool:
+        return self.cancel_email(**kwargs)
 
     # ------------------------------------------------------------------
     # SMS
@@ -134,6 +174,27 @@ class BrevoProvider(BaseProvider):
                 return tag.replace("missive_", "")
         return None
 
+    def validate_email_marketing_webhook_signature(
+        self, payload: Any, headers: Dict[str, str]
+    ) -> Tuple[bool, str]:
+        """Marketing emails share the same signature scheme."""
+        return self.validate_webhook_signature(
+            payload, headers, missive_type="EMAIL_MARKETING"
+        )
+
+    def handle_email_marketing_webhook(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """Delegate to transactional handler while keeping service naming."""
+        success, message, data = self.handle_email_webhook(payload, headers)
+        if not success and "email_marketing" not in message.lower():
+            message = f"[marketing] {message}"
+        return success, message, data
+
+    def extract_email_marketing_missive_id(self, payload: Any) -> Optional[str]:
+        """Reuse email missive ID extraction logic."""
+        return self.extract_email_missive_id(payload)
+
     def extract_sms_missive_id(self, payload: Any) -> Optional[str]:
         """Extract missive ID from Brevo SMS webhook payload."""
         if isinstance(payload, dict):
@@ -157,7 +218,7 @@ class BrevoProvider(BaseProvider):
         return {
             "status": "unknown",
             "is_available": None,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "mixed",
                 "email": {
@@ -240,6 +301,12 @@ class BrevoProvider(BaseProvider):
             "recommendations": recommendations,
             "should_send": should_send,
         }
+
+    def calculate_email_marketing_delivery_risk(
+        self, missive: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Marketing risk leverages the transactional heuristics."""
+        return self.calculate_email_delivery_risk(missive)
 
     def calculate_sms_delivery_risk(
         self, missive: Optional[Any] = None

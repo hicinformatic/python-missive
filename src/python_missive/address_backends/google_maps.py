@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from .base import BaseAddressBackend
 
@@ -69,14 +69,14 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         base_url = "https://maps.googleapis.com/maps/api"
         url = f"{base_url}{endpoint}"
 
-        request_params = {"key": self._api_key}
+        request_params: Dict[str, Any] = {"key": self._api_key}
         if params:
             request_params.update(params)
 
         try:
             response = requests.get(url, params=request_params, timeout=10)
             response.raise_for_status()
-            return response.json()
+            return cast(Dict[str, Any], response.json())
         except requests.exceptions.HTTPError as e:
             try:
                 error_data = response.json()

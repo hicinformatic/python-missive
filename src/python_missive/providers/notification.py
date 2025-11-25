@@ -15,9 +15,9 @@ class InAppNotificationProvider(BaseProvider):
     name = "notification"
     display_name = "Notification In-App"
     supported_types = ["NOTIFICATION"]
-    services = ["notification", "push_notification", "badge"]
-    # Geographic scope
-    notification_geo = "*"
+    services = ["notification"]
+    notification_geographic_coverage = ["*"]
+    notification_geo = notification_geographic_coverage
     required_packages = []
     description_text = "In-app notifications without external dependency"
 
@@ -103,7 +103,7 @@ class InAppNotificationProvider(BaseProvider):
         return {
             "status": "operational",
             "is_available": True,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "unlimited",
                 "remaining": None,

@@ -6,40 +6,49 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
 
-
-class BaseBrandedMixin:
-    """Generic mixin for messaging platforms (WhatsApp, Slack, etc.)."""
-
-    # Default limit for branded attachments (in MB)
-    max_attachment_size_mb: int = 20
-
-    # Allowed MIME types for branded attachments (empty list = all types allowed)
-    allowed_attachment_mime_types: list[str] = [
-        # Images
+BRANDED_DEFAULTS: Dict[str, Any] = {
+    "archiving_duration": 0,
+    "max_attachment_size_mb": 20,
+    "allowed_attachment_mime_types": [
         "image/jpeg",
         "image/png",
         "image/gif",
         "image/webp",
-        # Documents
         "application/pdf",
         "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "text/plain",
-        # Audio
         "audio/mpeg",
         "audio/mp3",
         "audio/ogg",
         "audio/wav",
-        # Video
         "video/mp4",
         "video/quicktime",
-        "video/x-msvideo",  # .avi
+        "video/x-msvideo",
+    ],
+    "geographic_coverage": ["*"],
+}
+
+
+class BaseBrandedMixin:
+    """Generic mixin for messaging platforms (WhatsApp, Slack, etc.)."""
+
+    branded_archiving_duration: int = BRANDED_DEFAULTS["archiving_duration"]
+    branded_max_attachment_size_mb: int = BRANDED_DEFAULTS["max_attachment_size_mb"]
+    branded_allowed_attachment_mime_types: list[str] = BRANDED_DEFAULTS[
+        "allowed_attachment_mime_types"
     ]
+    branded_geographic_coverage: list[str] | str = BRANDED_DEFAULTS[
+        "geographic_coverage"
+    ]
+    branded_geo = branded_geographic_coverage
+
+    brand_specific_config_fields: Dict[str, List[str]] = {}
 
     @property
     def max_attachment_size_bytes(self) -> int:
         """Return max attachment size in bytes."""
-        return int(self.max_attachment_size_mb * 1024 * 1024)
+        return int(self.branded_max_attachment_size_mb * 1024 * 1024)
 
     def send_branded(self, brand_name: Optional[str] = None, **kwargs) -> bool:
         """Send a branded message by dispatching to send_{brand_name}."""
@@ -66,6 +75,15 @@ class BaseBrandedMixin:
 
         return getattr(self, method_name)(**kwargs)
 
+    def _get_brand_config(self, brand_name: str) -> Dict[str, Any]:
+        """Return config overrides for a given brand from class attributes."""
+        overrides: Dict[str, Any] = {}
+        normalized = brand_name.lower()
+        for field in BRANDED_DEFAULTS.keys():
+            attr_name = f"{normalized}_{field}"
+            overrides[field] = getattr(self, attr_name, BRANDED_DEFAULTS[field])
+        return overrides
+
     def get_branded_service_info(
         self, brand_name: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -76,22 +94,34 @@ class BaseBrandedMixin:
             return {
                 "credits": None,
                 "is_available": None,
-                "limits": {},
+                "limits": {
+                    "archiving_duration_days": self.branded_archiving_duration,
+                },
                 "warnings": ["Provider name or brand_name missing"],
                 "details": {},
             }
 
-        method_name = f"get_{str(target_name).lower()}_service_info"
+        normalized = str(target_name).lower()
+        method_name = f"get_{normalized}_service_info"
 
         if hasattr(self, method_name):
             return getattr(self, method_name)()
 
+        config = self._get_brand_config(normalized)
         return {
             "credits": None,
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": config["archiving_duration"],
+                "max_attachment_size_mb": config["max_attachment_size_mb"],
+                "allowed_attachment_mime_types": config["allowed_attachment_mime_types"],
+            },
             "warnings": [f"{method_name}() method not implemented for this provider"],
-            "details": {},
+            "details": {
+                "geographic_coverage": config.get(
+                    "geographic_coverage", self.branded_geographic_coverage
+                ),
+            },
         }
 
     def check_branded_delivery_status(
@@ -110,7 +140,8 @@ class BaseBrandedMixin:
                 "details": {},
             }
 
-        method_name = f"check_{str(target_name).lower()}_delivery_status"
+        normalized = str(target_name).lower()
+        method_name = f"check_{normalized}_delivery_status"
 
         if hasattr(self, method_name):
             return getattr(self, method_name)(**kwargs)
@@ -202,21 +233,24 @@ class BaseBrandedMixin:
         return None
 
     def _check_attachment_mime_type(
-        self, attachment: Any, idx: int
+        self, attachment: Any, idx: int, *, brand_name: Optional[str] = None
     ) -> tuple[List[str], List[str]]:
         """Check MIME type for a single attachment."""
         errors: List[str] = []
         warnings: List[str] = []
 
+        target_name = brand_name or getattr(self, "name", None)
+        normalized = (target_name or "").lower()
+        allowed_mimes = self._get_brand_config(normalized)[
+            "allowed_attachment_mime_types"
+        ]
+
         mime_type = getattr(attachment, "mime_type", None)
         if mime_type:
-            if (
-                self.allowed_attachment_mime_types
-                and mime_type not in self.allowed_attachment_mime_types
-            ):
+            if allowed_mimes and mime_type not in allowed_mimes:
                 errors.append(
                     f"Attachment {idx + 1}: MIME type '{mime_type}' not allowed. "
-                    f"Allowed types: {', '.join(self.allowed_attachment_mime_types)}"
+                    f"Allowed types: {', '.join(allowed_mimes)}"
                 )
         else:
             warnings.append(f"Attachment {idx + 1}: MIME type not specified")
@@ -269,7 +303,9 @@ class BaseBrandedMixin:
 
         return None, errors, warnings
 
-    def check_attachments(self, attachments: List[Any]) -> Dict[str, Any]:
+    def check_attachments(
+        self, attachments: List[Any], brand_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Validate branded attachments against size and MIME type limits.
 
@@ -303,7 +339,10 @@ class BaseBrandedMixin:
             }
 
         total_size_bytes = 0
-        max_size_bytes = self.max_attachment_size_bytes
+        target_name = brand_name or getattr(self, "name", None)
+        normalized = (target_name or "").lower()
+        brand_config = self._get_brand_config(normalized)
+        max_size_bytes = int(brand_config["max_attachment_size_mb"] * 1024 * 1024)
 
         for idx, attachment in enumerate(attachments):
             attachment_errors: List[str] = []
@@ -311,7 +350,7 @@ class BaseBrandedMixin:
 
             # Check MIME type
             mime_errors, mime_warnings = self._check_attachment_mime_type(
-                attachment, idx
+                attachment, idx, brand_name=normalized
             )
             attachment_errors.extend(mime_errors)
             attachment_warnings.extend(mime_warnings)

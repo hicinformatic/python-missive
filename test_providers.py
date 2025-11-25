@@ -4,7 +4,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
+
+from python_missive.providers import (
+    ProviderImportError,
+    get_provider_name_from_path,
+    load_provider_class,
+)
 
 
 class MockMissive:
@@ -48,127 +54,95 @@ class MockRecipient:
         self.metadata = {}
 
 
-def test_provider_import_and_instantiation():
-    """Test that all providers can be imported and instantiated."""
-    
-    providers_to_test = [
-        ("SendGridProvider", "python_missive.providers.sendgrid"),
-        ("MailgunProvider", "python_missive.providers.mailgun"),
-        ("SESProvider", "python_missive.providers.ses"),
-        ("DjangoEmailProvider", "python_missive.providers.django_email"),
-        ("TwilioProvider", "python_missive.providers.twilio"),
-        ("VonageProvider", "python_missive.providers.vonage"),
-        ("LaPosteProvider", "python_missive.providers.laposte"),
-        ("MailevaProvider", "python_missive.providers.maileva"),
-        ("CerteuropeProvider", "python_missive.providers.certeurope"),
-        ("SlackProvider", "python_missive.providers.slack"),
-        ("TeamsProvider", "python_missive.providers.teams"),
-        ("TelegramProvider", "python_missive.providers.telegram"),
-        ("SignalProvider", "python_missive.providers.signal"),
-        ("MessengerProvider", "python_missive.providers.messenger"),
-        ("FCMProvider", "python_missive.providers.fcm"),
-        ("InAppNotificationProvider", "python_missive.providers.notification"),
-        # Existing providers
-        ("BrevoProvider", "python_missive.providers.brevo"),
-        ("SMSPartnerProvider", "python_missive.providers.smspartner"),
-        ("APNProvider", "python_missive.providers.apn"),
-        ("AR24Provider", "python_missive.providers.ar24"),
-    ]
-    
-    results = []
-    
-    for provider_name, module_path in providers_to_test:
-        try:
-            # Import the provider
-            import importlib
+def _load_providers_config() -> Dict[str, Dict[str, Any]]:
+    """Load MISSIVE_CONFIG_PROVIDERS from tests or local config."""
+    import importlib
 
-            module = importlib.import_module(module_path)
-            provider_class = getattr(module, provider_name)
-            
-            # Create a mock missive
-            missive = MockMissive()
-            
-            # Set appropriate missive type based on provider
-            if provider_name in ["TwilioProvider", "VonageProvider"]:
-                missive.missive_type = "SMS"
-            elif provider_name in ["LaPosteProvider", "MailevaProvider"]:
-                missive.missive_type = "POSTAL"
-            elif provider_name in ["CerteuropeProvider"]:
-                missive.missive_type = "LRE"
-            elif provider_name in ["SlackProvider", "TeamsProvider", "TelegramProvider", 
-                                   "SignalProvider", "MessengerProvider"]:
-                missive.missive_type = "BRANDED"
-            elif provider_name in ["FCMProvider"]:
-                missive.missive_type = "PUSH_NOTIFICATION"
-            elif provider_name in ["InAppNotificationProvider"]:
-                missive.missive_type = "NOTIFICATION"
-                missive.recipient_user = MockRecipient()
-            
-            # Create minimal config
-            config: Dict[str, Any] = {}
-            if provider_name == "SendGridProvider":
-                config = {"SENDGRID_API_KEY": "test_key"}
-            elif provider_name == "MailgunProvider":
-                config = {"MAILGUN_API_KEY": "test_key", "MAILGUN_DOMAIN": "test.com"}
-            elif provider_name == "SESProvider":
-                config = {
-                    "AWS_ACCESS_KEY_ID": "test_key",
-                    "AWS_SECRET_ACCESS_KEY": "test_secret",
-                    "AWS_REGION": "eu-west-1",
-                    "SES_FROM_EMAIL": "test@example.com"
-                }
-            elif provider_name == "DjangoEmailProvider":
-                config = {
-                    "DEFAULT_FROM_EMAIL": "noreply@example.com",
-                    "EMAIL_SUPPRESS_SEND": True,
-                }
-            elif provider_name == "TwilioProvider":
-                config = {
-                    "TWILIO_ACCOUNT_SID": "test_sid",
-                    "TWILIO_AUTH_TOKEN": "test_token",
-                    "TWILIO_PHONE_NUMBER": "+33612345678"
-                }
-            elif provider_name == "VonageProvider":
-                config = {
-                    "VONAGE_API_KEY": "test_key",
-                    "VONAGE_API_SECRET": "test_secret",
-                    "VONAGE_FROM_NUMBER": "+33612345678"
-                }
-            elif provider_name == "LaPosteProvider":
-                config = {"LAPOSTE_API_KEY": "test_key"}
-            elif provider_name == "MailevaProvider":
-                config = {
-                    "MAILEVA_CLIENTID": "test_client",
-                    "MAILEVA_SECRET": "test_secret",
-                    "MAILEVA_USERNAME": "test_user",
-                    "MAILEVA_PASSWORD": "test_pass",
-                }
-            elif provider_name == "CerteuropeProvider":
-                config = {
-                    "CERTEUROPE_API_KEY": "test_key",
-                    "CERTEUROPE_API_SECRET": "test_secret",
-                    "CERTEUROPE_API_URL": "https://test.com",
-                    "CERTEUROPE_SENDER_EMAIL": "test@example.com"
-                }
-            elif provider_name == "SlackProvider":
-                config = {"SLACK_BOT_TOKEN": "test_token", "SLACK_SIGNING_SECRET": "test_secret"}
-            elif provider_name == "TeamsProvider":
-                config = {
-                    "TEAMS_CLIENT_ID": "test_id",
-                    "TEAMS_CLIENT_SECRET": "test_secret",
-                    "TEAMS_TENANT_ID": "test_tenant"
-                }
-            elif provider_name == "TelegramProvider":
-                config = {"TELEGRAM_BOT_TOKEN": "test_token"}
-            elif provider_name == "SignalProvider":
-                config = {"SIGNAL_API_KEY": "test_key"}
-            elif provider_name == "MessengerProvider":
-                config = {"MESSENGER_PAGE_ACCESS_TOKEN": "test_token", "MESSENGER_VERIFY_TOKEN": "test_token"}
-            elif provider_name == "FCMProvider":
-                config = {"FCM_SERVER_KEY": "test_key"}
-            
-            # Instantiate provider
-            provider = provider_class(missive=missive, config=config)
+    for module_name in ("tests.test_config", "test_config"):
+        try:
+            module = importlib.import_module(module_name)
+            config = getattr(module, "MISSIVE_CONFIG_PROVIDERS")
+            if isinstance(config, dict):
+                return config
+        except (ImportError, AttributeError):
+            continue
+    raise ImportError(
+        "MISSIVE_CONFIG_PROVIDERS not found. Ensure tests/test_config.py is accessible."
+    )
+
+
+def _build_missive_for_type(missive_type: str) -> MockMissive:
+    """Return a minimal missive object compatible with the given type."""
+    missive = MockMissive()
+    normalized = missive_type.upper()
+    missive.missive_type = normalized
+
+    if normalized in {"NOTIFICATION"}:
+        missive.recipient_user = MockRecipient()
+
+    if normalized in {"PUSH_NOTIFICATION"}:
+        missive.recipient.metadata["apn_device_token"] = "a" * 64
+
+    if normalized in {
+        "POSTAL",
+        "POSTAL_REGISTERED",
+        "POSTAL_SIGNATURE",
+        "LRE",
+        "LRE_QUALIFIED",
+        "ERE",
+    }:
+        missive.recipient.address_line1 = "123 Test Street"
+        missive.recipient.postal_code = "75001"
+        missive.recipient.city = "Paris"
+        missive.recipient.email = "test@example.com"
+
+    if normalized in {"SMS", "VOICE_CALL", "BRANDED"}:
+        missive.recipient_phone = "+33612345678"
+
+    if normalized in {"EMAIL", "EMAIL_MARKETING", "ERE", "LRE"}:
+        missive.recipient_email = "test@example.com"
+
+    return missive
+
+
+def _iter_supported_types(provider_class: type[BaseProvider]) -> Iterable[str]:
+    types = getattr(provider_class, "supported_types", None)
+    if not types:
+        return ["EMAIL"]
+    return [str(t).upper() for t in types]
+
+
+def test_provider_import_and_instantiation():
+    """Test that all providers can be imported and instantiated using config."""
+
+    providers_config = _load_providers_config()
+    results = []
+
+    for provider_path, provider_settings in providers_config.items():
+        provider_name = get_provider_name_from_path(provider_path)
+
+        try:
+            provider_class = load_provider_class(provider_path)
+        except ProviderImportError as e:
+            results.append((provider_name, False, f"Import error: {e}"))
+            print(f"✗ {provider_name}: Import error - {e}")
+            continue
+
+        supported_types = list(_iter_supported_types(provider_class))
+        config: Dict[str, Any] = (
+            dict(provider_settings) if isinstance(provider_settings, dict) else {}
+        )
+
+        for missive_type in supported_types:
+            label = f"{provider_name}[{missive_type}]"
+            missive = _build_missive_for_type(missive_type)
+
+            try:
+                provider = provider_class(missive=missive, config=config)
+            except Exception as exc:
+                results.append((label, False, f"Instantiation failed: {exc}"))
+                print(f"✗ {label}: Instantiation error - {exc}")
+                break
             
             # Test basic attributes
             assert hasattr(provider, "name"), f"{provider_name} missing 'name' attribute"
@@ -178,39 +152,33 @@ def test_provider_import_and_instantiation():
             # Test validate method
             try:
                 is_valid, error = provider.validate()
-                assert isinstance(is_valid, bool), f"{provider_name}.validate() should return bool"
-                assert isinstance(error, str), f"{provider_name}.validate() should return str"
+                assert isinstance(is_valid, bool), f"{label}.validate() should return bool"
+                assert isinstance(error, str), f"{label}.validate() should return str"
             except Exception as e:
-                results.append((provider_name, False, f"validate() failed: {e}"))
-                continue
+                results.append((label, False, f"validate() failed: {e}"))
+                print(f"✗ {label}: validate() error - {e}")
+                break
             
             # Test get_service_status method
             try:
                 status = provider.get_service_status()
-                assert isinstance(status, dict), f"{provider_name}.get_service_status() should return dict"
+                assert isinstance(status, dict), f"{label}.get_service_status() should return dict"
             except Exception as e:
-                results.append((provider_name, False, f"get_service_status() failed: {e}"))
-                continue
+                results.append((label, False, f"get_service_status() failed: {e}"))
+                print(f"✗ {label}: get_service_status() error - {e}")
+                break
             
             # Test supports method
             try:
-                supports = provider.supports(missive.missive_type)
-                assert isinstance(supports, bool), f"{provider_name}.supports() should return bool"
+                supports = provider.supports(missive_type)
+                assert isinstance(supports, bool), f"{label}.supports() should return bool"
             except Exception as e:
-                results.append((provider_name, False, f"supports() failed: {e}"))
-                continue
-            
-            results.append((provider_name, True, "OK"))
-            print(f"✓ {provider_name}: OK")
-            
-        except ImportError as e:
-            results.append((provider_name, False, f"Import error: {e}"))
-            print(f"✗ {provider_name}: Import error - {e}")
-        except Exception as e:
-            results.append((provider_name, False, f"Error: {e}"))
-            print(f"✗ {provider_name}: Error - {e}")
-            import traceback
-            traceback.print_exc()
+                results.append((label, False, f"supports() failed: {e}"))
+                print(f"✗ {label}: supports() error - {e}")
+                break
+
+            results.append((label, True, "OK"))
+            print(f"✓ {label}: OK")
     
     # Summary
     print("\n" + "="*60)

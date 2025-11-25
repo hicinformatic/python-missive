@@ -10,18 +10,26 @@ from ...status import MissiveStatus
 class BaseVoiceCallMixin:
     """Voice call-specific functionality mixin."""
 
+    voice_call_archiving_duration: int = 0  # Days call logs stay downloadable
+    voice_call_geographic_coverage: list[str] | str = ["*"]
+    voice_call_geo = voice_call_geographic_coverage
+
     def get_voice_call_service_info(self) -> Dict[str, Any]:
         """Return voice call service information. Override in subclasses."""
         return {
             "credits": None,
             "credits_type": "time",
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": self.voice_call_archiving_duration,
+            },
             "warnings": [
                 "get_voice_call_service_info() method not implemented for this provider"
             ],
             "options": [],
-            "details": {},
+            "details": {
+                "geographic_coverage": self.voice_call_geographic_coverage,
+            },
         }
 
     def check_voice_call_delivery_status(self, **kwargs) -> Dict[str, Any]:

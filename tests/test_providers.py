@@ -251,19 +251,7 @@ def test_provider_method() -> None:
         pytest.skip("TEST_SERVICE must be set")
 
     # Normalize service type
-    service_to_missive = {
-        "email": "EMAIL",
-        "sms": "SMS",
-        "postal": "POSTAL",
-        "postal_registered": "POSTAL_REGISTERED",
-        "postal_signature": "POSTAL_REGISTERED",
-        "lre": "LRE",
-        "push_notification": "PUSH_NOTIFICATION",
-        "notification": "NOTIFICATION",
-        "voice_call": "VOICE_CALL",
-        "branded": "BRANDED",
-    }
-    missive_type = service_to_missive.get(service_type.lower(), service_type.upper())
+    missive_type = service_type.upper()
 
     # Map method shortcuts to full method names
     method_map = {
@@ -280,15 +268,15 @@ def test_provider_method() -> None:
 
     # Create a basic missive based on service type
     missive_kwargs: Dict[str, Any] = {"missive_type": missive_type}
-    if service_type == "email":
+    if service_type.lower() == "email":
         missive_kwargs["recipient_email"] = "test@example.com"
-    elif service_type == "sms":
+    elif service_type.lower() == "sms":
         missive_kwargs["recipient_phone"] = "+33102030405"
-    elif service_type == "push_notification":
+    elif service_type.lower() == "push_notification":
         missive_kwargs["recipient"] = RecipientStub(
             metadata={"apn_device_token": "a" * 64}
         )
-    elif service_type in ("postal", "lre"):
+    elif service_type.lower() in ("postal", "postal_registered", "postal_signature", "lre"):
         missive_kwargs["recipient"] = RecipientStub(
             email="test@example.com",
             address_line1="123 Test St",

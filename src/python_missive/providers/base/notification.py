@@ -10,18 +10,29 @@ from ...status import MissiveStatus
 class BaseNotificationMixin:
     """In-app notification-specific functionality mixin."""
 
+    notification_archiving_duration: int = 0  # Days notifications stay visible
+    push_notification_archiving_duration: int = 0  # Days push events remain queryable
+    notification_geographic_coverage: list[str] | str = ["*"]
+    push_notification_geographic_coverage: list[str] | str = ["*"]
+    notification_geo = notification_geographic_coverage
+    push_notification_geo = push_notification_geographic_coverage
+
     def get_notification_service_info(self) -> Dict[str, Any]:
         """Return notification service information. Override in subclasses."""
         return {
             "credits": None,
             "credits_type": "unlimited",
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": self.notification_archiving_duration,
+            },
             "warnings": [
                 "get_notification_service_info() method not implemented for this provider"
             ],
             "channels": [],
-            "details": {},
+            "details": {
+                "geographic_coverage": self.notification_geographic_coverage,
+            },
         }
 
     def check_notification_delivery_status(self, **kwargs) -> Dict[str, Any]:
@@ -120,10 +131,14 @@ class BaseNotificationMixin:
             "credits": None,
             "credits_type": "unlimited",
             "is_available": None,
-            "limits": {},
+            "limits": {
+                "archiving_duration_days": self.push_notification_archiving_duration,
+            },
             "warnings": ["Push notification service info not implemented"],
             "channels": [],
-            "details": {},
+            "details": {
+                "geographic_coverage": self.push_notification_geographic_coverage,
+            },
         }
 
     def calculate_push_notification_delivery_risk(

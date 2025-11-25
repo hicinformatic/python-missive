@@ -208,7 +208,7 @@ class TwilioProvider(BaseProvider):
         return {
             "status": "unknown",
             "is_available": None,
-            "services": self.services,
+            "services": self._get_services(),
             "credits": {
                 "type": "money",
                 "remaining": None,
