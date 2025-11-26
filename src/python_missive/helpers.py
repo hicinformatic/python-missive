@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import re
 from functools import cmp_to_key
 from pathlib import Path
@@ -22,6 +23,15 @@ _ProvidersConfig = Sequence[str] | Mapping[str, Mapping[str, Any]]
 
 # Cache for country phone codes
 _COUNTRY_PHONE_CODES: Dict[str, List[str]] = {}
+
+try:
+    _DEFAULT_MIN_CONFIDENCE = float(
+        os.getenv("PYTHON_MISSIVE_MIN_ADDRESS_CONFIDENCE", "0.4")
+    )
+except ValueError:
+    _DEFAULT_MIN_CONFIDENCE = 0.4
+
+DEFAULT_MIN_ADDRESS_CONFIDENCE = max(0.0, _DEFAULT_MIN_CONFIDENCE)
 
 
 def _load_country_phone_codes() -> Dict[str, List[str]]:
@@ -597,6 +607,32 @@ def _resolve_extra_kwargs(
     return resolved
 
 
+def _coerce_confidence(value: Any) -> Optional[float]:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _passes_min_confidence(value: Any, threshold: float) -> bool:
+    confidence = _coerce_confidence(value)
+    if confidence is None:
+        return True
+    return confidence >= threshold
+
+
+def _resolve_min_confidence(min_confidence: Optional[float]) -> float:
+    if min_confidence is None:
+        return DEFAULT_MIN_ADDRESS_CONFIDENCE
+    try:
+        threshold = float(min_confidence)
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_ADDRESS_CONFIDENCE
+    return max(0.0, threshold)
+
+
 def _mask_value(value: Any) -> Optional[str]:
     if not value:
         return None
@@ -660,6 +696,9 @@ def _build_backend_diagnostic(
             {
                 "status": status,
                 "backend_name": getattr(backend_instance, "name", class_name),
+                "backend_display_name": getattr(
+                    backend_instance, "label", getattr(backend_instance, "name", class_name)
+                ),
                 "documentation_url": backend_instance.documentation_url,
                 "site_url": backend_instance.site_url,
                 "required_packages": backend_instance.required_packages,
@@ -734,6 +773,7 @@ def describe_address_backends(
         sample_result = get_address_from_backends(
             backends_config,
             operation=normalized_operation,
+            min_confidence=None,
             **resolved_address_kwargs,
             **extra_kwargs_for_call,
         )
@@ -884,6 +924,7 @@ def get_address_from_backends(
     postal_code: Optional[str] = None,
     state: Optional[str] = None,
     country: Optional[str] = None,
+    min_confidence: Optional[float] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """Get address information by trying backends in order until one succeeds.
@@ -901,6 +942,9 @@ def get_address_from_backends(
         postal_code: Postal/ZIP code.
         state: State/region/province.
         country: ISO country code (e.g., "FR", "US", "GB").
+        min_confidence: Optional minimum confidence (0-1) required for suggestions
+            or normalized addresses. Defaults to
+            ``PYTHON_MISSIVE_MIN_ADDRESS_CONFIDENCE`` env var or 0.4.
         **kwargs: Additional arguments (e.g., latitude, longitude for reverse_geocode).
 
     Returns:
@@ -943,6 +987,8 @@ def get_address_from_backends(
         "country": country,
     }
 
+    threshold = _resolve_min_confidence(min_confidence)
+
     for backend in backends:
         try:
             if operation == "validate":
@@ -967,6 +1013,41 @@ def get_address_from_backends(
                 or "not installed" in e.lower()
                 or ("error" in e.lower() and "no address found" not in e.lower())
             ]
+
+            no_address_found = any(
+                "no address found" in e.lower() for e in errors if isinstance(e, str)
+            )
+
+            suggestions = result.get("suggestions") or []
+            filtered_suggestions = [
+                suggestion
+                for suggestion in suggestions
+                if _passes_min_confidence(suggestion.get("confidence"), threshold)
+            ]
+            result["suggestions"] = filtered_suggestions
+
+            normalized_block = result.get("normalized_address") or {}
+            normalized_confidence_ok = _passes_min_confidence(
+                result.get("confidence"), threshold
+            )
+            has_normalized_payload = bool(
+                normalized_block
+                or result.get("formatted_address")
+                or result.get("address_line1")
+            )
+
+            if (
+                not filtered_suggestions
+                and (
+                    no_address_found
+                    or not has_normalized_payload
+                    or (
+                        result.get("confidence") is not None
+                        and not normalized_confidence_ok
+                    )
+                )
+            ):
+                continue
 
             # If no critical errors, return the result
             if not critical_errors:

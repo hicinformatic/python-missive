@@ -15,6 +15,7 @@ class PhotonAddressBackend(BaseAddressBackend):
     """
 
     name = "photon"
+    display_name = "Photon (Komoot)"
     config_keys = ["PHOTON_BASE_URL"]
     required_packages = ["requests"]
     documentation_url = "https://photon.komoot.io/"

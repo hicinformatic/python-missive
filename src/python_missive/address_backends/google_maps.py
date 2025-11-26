@@ -14,6 +14,7 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
     """
 
     name = "google_maps"
+    display_name = "Google Maps"
     config_keys = ["GOOGLE_MAPS_API_KEY"]
     required_packages = ["requests"]
     documentation_url = "https://developers.google.com/maps/documentation/geocoding"

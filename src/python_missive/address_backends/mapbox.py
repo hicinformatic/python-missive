@@ -14,6 +14,7 @@ class MapboxAddressBackend(BaseAddressBackend):
     """
 
     name = "mapbox"
+    display_name = "Mapbox"
     config_keys = ["MAPBOX_ACCESS_TOKEN"]
     required_packages = ["requests"]
     documentation_url = "https://docs.mapbox.com/api/search/geocoding/"

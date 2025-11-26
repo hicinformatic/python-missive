@@ -13,6 +13,7 @@ class BaseAddressBackend:
     """
 
     name: str = "base"
+    display_name: Optional[str] = None
     config_keys: List[str] = []
     required_packages: List[str] = []
     documentation_url: Optional[str] = None
@@ -32,6 +33,15 @@ class BaseAddressBackend:
         if not self.config_keys:
             return dict(config)
         return {k: v for k, v in config.items() if k in self.config_keys}
+
+    @property
+    def label(self) -> str:
+        """Human-friendly backend name."""
+        if self.display_name:
+            return self.display_name
+        if self.name:
+            return self.name.replace("_", " ").title()
+        return self.__class__.__name__
 
     @property
     def config(self) -> Dict[str, Any]:

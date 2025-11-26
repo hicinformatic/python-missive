@@ -16,6 +16,7 @@ class NominatimAddressBackend(BaseAddressBackend):
     """
 
     name = "nominatim"
+    display_name = "OpenStreetMap Nominatim"
     config_keys = ["NOMINATIM_BASE_URL", "NOMINATIM_USER_AGENT"]
     required_packages = ["requests"]
     documentation_url = "https://nominatim.org/release-docs/develop/api/Overview/"

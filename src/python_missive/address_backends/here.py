@@ -14,6 +14,7 @@ class HereAddressBackend(BaseAddressBackend):
     """
 
     name = "here"
+    display_name = "HERE"
     config_keys = ["HERE_APP_ID", "HERE_APP_CODE"]
     required_packages = ["requests"]
     documentation_url = "https://developer.here.com/documentation/geocoding-search-api"

@@ -6,13 +6,15 @@ from typing import Dict
 
 import pytest
 
+from python_missive.address import Address
 from python_missive.address_backends import (BaseAddressBackend,
                                              GoogleMapsAddressBackend,
                                              HereAddressBackend,
                                              MapboxAddressBackend,
                                              NominatimAddressBackend,
                                              PhotonAddressBackend)
-from python_missive.helpers import (get_address_backends_from_config,
+from python_missive.helpers import (describe_address_backends,
+                                    get_address_backends_from_config,
                                     get_address_from_backends)
 from tests.test_config import (MISSIVE_CONFIG_ADDRESS_BACKENDS,
                                get_working_address_backend)
@@ -100,6 +102,65 @@ class TestBaseAddressBackend:
         assert "config" in result
         assert isinstance(result["packages"], dict)
         assert isinstance(result["config"], dict)
+
+
+class TestAddressBackendDisplayName:
+    """Tests for human-readable backend names."""
+
+    def test_base_backend_label_defaults_to_title_case(self):
+        backend = BaseAddressBackend()
+        assert backend.label == "Base"
+
+    def test_describe_address_backends_includes_display_name(self):
+        payload = describe_address_backends(
+            [
+                {
+                    "class": "python_missive.address_backends.nominatim.NominatimAddressBackend",
+                    "config": {},
+                }
+            ],
+            skip_api_test=True,
+        )
+        assert payload["items"][0]["backend_display_name"] == "OpenStreetMap Nominatim"
+
+
+class TestAddressModel:
+    """Unit tests for the Address dataclass."""
+
+    def test_from_dict_and_to_dict(self):
+        payload = {
+            "line1": "1600 Amphitheatre Parkway",
+            "line2": "Bâtiment 2",
+            "postal_code": "94043",
+            "city": "Mountain View",
+            "country": "US",
+            "latitude": 37.4221,
+            "longitude": -122.0841,
+            "formatted_address": "1600 Amphitheatre Parkway, 94043 Mountain View, US",
+            "backend_used": "google_maps",
+            "backend_reference": "gmaps:place:123",
+        }
+        address = Address.from_dict(payload)
+        assert address.line1 == payload["line1"]
+        assert address.city == "Mountain View"
+        assert address.backend_reference == "gmaps:place:123"
+        serialized = address.to_dict()
+        assert serialized["line1"] == payload["line1"]
+        assert serialized["city"] == payload["city"]
+        assert serialized["backend_reference"] == "gmaps:place:123"
+
+    def test_normalize_with_backends(self, real_address):
+        normalized, payload = Address.normalize_with_backends(
+            MISSIVE_CONFIG_ADDRESS_BACKENDS,
+            **real_address,
+        )
+        assert isinstance(normalized, Address)
+        assert payload or normalized.line1
+        # When a backend is available we should either get a backend name or warnings
+        if payload.get("backend_used"):
+            assert normalized.backend_used == payload["backend_used"]
+        if payload.get("backend_reference"):
+            assert normalized.backend_reference == payload["backend_reference"]
 
 
 class TestNominatimAddressBackend:
@@ -423,3 +484,122 @@ class TestAddressBackendFallback:
             assert "formatted_address" in result
             assert "address_line1" in result
             assert "city" in result
+
+    def test_min_confidence_triggers_fallback(self, monkeypatch):
+        """Ensure low-confidence backend is skipped in favor of the next."""
+
+        class LowBackend:
+            name = "low"
+
+            def validate_address(self, **kwargs):
+                return {
+                    "is_valid": True,
+                    "confidence": 0.2,
+                    "normalized_address": {"address_line1": "Low Street"},
+                    "errors": [],
+                }
+
+        class HighBackend:
+            name = "high"
+
+            def validate_address(self, **kwargs):
+                return {
+                    "is_valid": True,
+                    "confidence": 0.9,
+                    "normalized_address": {"address_line1": "High Street"},
+                    "errors": [],
+                }
+
+        monkeypatch.setattr(
+            "python_missive.helpers.get_address_backends_from_config",
+            lambda config: [LowBackend(), HighBackend()],
+        )
+
+        result = get_address_from_backends(
+            [{"class": "dummy.Low"}],
+            operation="validate",
+            address_line1="12 Example Rd",
+            city="Paris",
+            country="FR",
+            min_confidence=0.4,
+        )
+
+        assert result["backend_used"] == "high"
+        assert result["normalized_address"]["address_line1"] == "High Street"
+
+    def test_min_confidence_filters_suggestions(self, monkeypatch):
+        """Ensure low-confidence suggestions are discarded."""
+
+        class SuggestBackend:
+            name = "suggest"
+
+            def validate_address(self, **kwargs):
+                return {
+                    "is_valid": False,
+                    "confidence": None,
+                    "suggestions": [
+                        {"label": "Weak match", "confidence": 0.2},
+                        {"label": "Strong match", "confidence": 0.85},
+                    ],
+                    "errors": [],
+                }
+
+        monkeypatch.setattr(
+            "python_missive.helpers.get_address_backends_from_config",
+            lambda config: [SuggestBackend()],
+        )
+
+        result = get_address_from_backends(
+            [{"class": "dummy.Suggest"}],
+            operation="validate",
+            address_line1="34 Example Rd",
+            city="Paris",
+            country="FR",
+            min_confidence=0.5,
+        )
+
+        assert result["backend_used"] == "suggest"
+        suggestions = result["suggestions"]
+        assert len(suggestions) == 1
+        assert suggestions[0]["label"] == "Strong match"
+
+    def test_min_confidence_retries_when_only_low_suggestions(self, monkeypatch):
+        """Ensure we fallback if a backend only returns low-confidence suggestions."""
+
+        class LowSuggestBackend:
+            name = "low_suggest"
+
+            def validate_address(self, **kwargs):
+                return {
+                    "is_valid": False,
+                    "confidence": None,
+                    "suggestions": [{"label": "Maybe", "confidence": 0.1}],
+                    "errors": [],
+                }
+
+        class NextBackend:
+            name = "next"
+
+            def validate_address(self, **kwargs):
+                return {
+                    "is_valid": True,
+                    "confidence": 0.95,
+                    "normalized_address": {"address_line1": "Definitive"},
+                    "errors": [],
+                }
+
+        monkeypatch.setattr(
+            "python_missive.helpers.get_address_backends_from_config",
+            lambda config: [LowSuggestBackend(), NextBackend()],
+        )
+
+        result = get_address_from_backends(
+            [{"class": "dummy.LowSuggest"}],
+            operation="validate",
+            address_line1="99 Example Rd",
+            city="Paris",
+            country="FR",
+            min_confidence=0.6,
+        )
+
+        assert result["backend_used"] == "next"

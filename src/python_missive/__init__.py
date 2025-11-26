@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Sequence, Union
 
+from .address import Address
 from .address_backends import (BaseAddressBackend, GoogleMapsAddressBackend,
                                HereAddressBackend, MapboxAddressBackend,
                                NominatimAddressBackend, PhotonAddressBackend)
-from .helpers import (describe_address_backends, format_phone_international,
-                      get_address_backend_by_attribute,
+from .helpers import (DEFAULT_MIN_ADDRESS_CONFIDENCE, describe_address_backends,
+                      format_phone_international, get_address_backend_by_attribute,
                       get_address_backends_from_config,
                       get_address_from_backends, get_provider_by_attribute)
 from .missive import Missive
@@ -19,6 +20,7 @@ from .status import MissiveStatus
 __all__ = [
     "MissiveStatus",
     "BaseProviderCommon",
+    "Address",
     "Missive",
     "MissiveSender",
     "send_missive",
@@ -28,6 +30,7 @@ __all__ = [
     "get_address_backend_by_attribute",
     "describe_address_backends",
     "get_provider_by_attribute",
+    "DEFAULT_MIN_ADDRESS_CONFIDENCE",
     "BaseAddressBackend",
     "GoogleMapsAddressBackend",
     "HereAddressBackend",
