@@ -177,6 +177,52 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
             ),
         },
     },
+    # Free tier backends (API key required, but free tier available) - try these next
+    {
+        "class": "python_missive.address_backends.locationiq.LocationIQAddressBackend",
+        "config": {
+            "LOCATIONIQ_API_KEY": _get_env_or_default("LOCATIONIQ_API_KEY", ""),
+            "LOCATIONIQ_BASE_URL": _get_env_or_default(
+                "LOCATIONIQ_BASE_URL", "https://api.locationiq.com/v1"
+            ),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.opencage.OpenCageAddressBackend",
+        "config": {
+            "OPENCAGE_API_KEY": _get_env_or_default("OPENCAGE_API_KEY", ""),
+            "OPENCAGE_BASE_URL": _get_env_or_default(
+                "OPENCAGE_BASE_URL", "https://api.opencagedata.com/geocode/v1"
+            ),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.geocode_earth.GeocodeEarthAddressBackend",
+        "config": {
+            "GEOCODE_EARTH_API_KEY": _get_env_or_default("GEOCODE_EARTH_API_KEY", ""),
+            "GEOCODE_EARTH_BASE_URL": _get_env_or_default(
+                "GEOCODE_EARTH_BASE_URL", "https://api.geocode.earth/v1"
+            ),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.geoapify.GeoapifyAddressBackend",
+        "config": {
+            "GEOAPIFY_API_KEY": _get_env_or_default("GEOAPIFY_API_KEY", ""),
+            "GEOAPIFY_BASE_URL": _get_env_or_default(
+                "GEOAPIFY_BASE_URL", "https://api.geoapify.com/v1"
+            ),
+        },
+    },
+    {
+        "class": "python_missive.address_backends.maps_co.MapsCoAddressBackend",
+        "config": {
+            "MAPS_CO_API_KEY": _get_env_or_default("MAPS_CO_API_KEY", ""),
+            "MAPS_CO_BASE_URL": _get_env_or_default(
+                "MAPS_CO_BASE_URL", "https://geocode.maps.co"
+            ),
+        },
+    },
     # Paid backends (API key required) - try these if free ones fail
     {
         "class": "python_missive.address_backends.google_maps.GoogleMapsAddressBackend",
