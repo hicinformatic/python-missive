@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
+from ._attachments import (
+    AttachmentMimeTypeMixin,
+    attachment_check_empty_result,
+    summarize_attachment_validation,
+)
 
 BRANDED_DEFAULTS: Dict[str, Any] = {
     "archiving_duration": 0,
@@ -30,7 +35,7 @@ BRANDED_DEFAULTS: Dict[str, Any] = {
 }
 
 
-class BaseBrandedMixin:
+class BaseBrandedMixin(AttachmentMimeTypeMixin):
     """Generic mixin for messaging platforms (WhatsApp, Slack, etc.)."""
 
     branded_archiving_duration: int = BRANDED_DEFAULTS["archiving_duration"]
@@ -259,52 +264,6 @@ class BaseBrandedMixin:
 
         return errors, warnings
 
-    def _get_attachment_size(self, attachment: Any) -> Optional[int]:
-        """Get attachment size in bytes, trying multiple methods."""
-        size_bytes = getattr(attachment, "size_bytes", None)
-        if size_bytes is not None:
-            return size_bytes
-
-        # Try to get size from file object
-        file_obj = getattr(attachment, "file", None)
-        if file_obj and hasattr(file_obj, "read"):
-            try:
-                current_pos = file_obj.tell() if hasattr(file_obj, "tell") else 0
-                file_obj.seek(0, 2)  # Seek to end
-                size_bytes = file_obj.tell() if hasattr(file_obj, "tell") else None
-                file_obj.seek(current_pos)  # Restore position
-                return size_bytes
-            except Exception:
-                pass
-
-        return None
-
-    def _check_attachment_size(
-        self, attachment: Any, idx: int, max_size_bytes: int
-    ) -> tuple[Optional[int], List[str], List[str]]:
-        """Check file size for a single attachment."""
-        errors: List[str] = []
-        warnings: List[str] = []
-
-        size_bytes = self._get_attachment_size(attachment)
-        if size_bytes is not None:
-            try:
-                size_bytes = int(size_bytes)
-                if size_bytes > max_size_bytes:
-                    size_mb = size_bytes / (1024 * 1024)
-                    max_mb = self.max_attachment_size_mb
-                    errors.append(
-                        f"Attachment {idx + 1}: Size {size_mb:.2f} MB exceeds maximum "
-                        f"of {max_mb} MB"
-                    )
-                return size_bytes, errors, warnings
-            except (ValueError, TypeError):
-                warnings.append(f"Attachment {idx + 1}: Invalid size_bytes value")
-        else:
-            warnings.append(f"Attachment {idx + 1}: File size not specified")
-
-        return None, errors, warnings
-
     def check_attachments(
         self, attachments: List[Any], brand_name: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -324,73 +283,36 @@ class BaseBrandedMixin:
                 - warnings: List[str] of warning messages
                 - details: Dict with per-attachment validation details
         """
-        errors: List[str] = []
-        warnings: List[str] = []
-        details: Dict[str, Any] = {
-            "total_size_bytes": 0,
-            "attachments_checked": 0,
-            "attachments_valid": 0,
-        }
-
         if not attachments:
-            return {
-                "is_valid": True,
-                "errors": [],
-                "warnings": [],
-                "details": details,
-            }
+            return attachment_check_empty_result()
 
-        total_size_bytes = 0
         target_name = brand_name or getattr(self, "name", None)
         normalized = (target_name or "").lower()
         brand_config = self._get_brand_config(normalized)
-        max_size_bytes = int(brand_config["max_attachment_size_mb"] * 1024 * 1024)
+        max_size_mb = float(brand_config["max_attachment_size_mb"])
+        max_size_bytes = int(max_size_mb * 1024 * 1024)
 
-        for idx, attachment in enumerate(attachments):
-            attachment_errors: List[str] = []
-            attachment_warnings: List[str] = []
-
-            # Check MIME type
-            mime_errors, mime_warnings = self._check_attachment_mime_type(
-                attachment, idx, brand_name=normalized
-            )
-            attachment_errors.extend(mime_errors)
-            attachment_warnings.extend(mime_warnings)
-
-            # Check file size
-            size_bytes, size_errors, size_warnings = self._check_attachment_size(
+        return summarize_attachment_validation(
+            attachments=attachments,
+            mime_checker=lambda attachment, idx: self._check_attachment_mime_type(
+                attachment,
+                idx,
+                allowed_types=brand_config["allowed_attachment_mime_types"],
+            ),
+            size_checker=lambda attachment, idx: self._check_attachment_size(
                 attachment, idx, max_size_bytes
-            )
-            attachment_errors.extend(size_errors)
-            attachment_warnings.extend(size_warnings)
-
-            if size_bytes is not None:
-                total_size_bytes += size_bytes
-
-            if attachment_errors:
-                errors.extend(attachment_errors)
-            if attachment_warnings:
-                warnings.extend(attachment_warnings)
-
-            details["attachments_checked"] += 1
-            if not attachment_errors:
-                details["attachments_valid"] += 1
-
-        # Check total size across all attachments
-        details["total_size_bytes"] = total_size_bytes
-        total_size_mb = total_size_bytes / (1024 * 1024)
-        if total_size_bytes > max_size_bytes:
-            errors.append(
-                f"Total attachment size ({total_size_mb:.2f} MB) exceeds maximum "
-                f"of {self.max_attachment_size_mb} MB"
-            )
-
-        return {
-            "is_valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-            "details": details,
-        }
+            ),
+            max_size_bytes=max_size_bytes,
+            max_size_mb=max_size_mb,
+            size_error_template=(
+                "Total attachment size ({total_mb:.2f} MB) exceeds maximum of {max_mb:.2f} MB"
+            ),
+            details_factory=lambda: {
+                "total_size_bytes": 0,
+                "attachments_checked": 0,
+                "attachments_valid": 0,
+            },
+        )
 
     def prepare_branded_attachments(
         self, attachments: List[Any]

@@ -8,11 +8,16 @@ from .address import Address
 from .address_backends import (BaseAddressBackend, GoogleMapsAddressBackend,
                                HereAddressBackend, MapboxAddressBackend,
                                NominatimAddressBackend, PhotonAddressBackend)
-from .helpers import (DEFAULT_MIN_ADDRESS_CONFIDENCE,
-                      describe_address_backends, format_phone_international,
-                      get_address_backend_by_attribute,
-                      get_address_backends_from_config,
-                      get_provider_by_attribute, search_addresses)
+from .helpers import (
+    DEFAULT_MIN_ADDRESS_CONFIDENCE,
+    describe_address_backends,
+    format_phone_international,
+    get_address_backend_by_attribute,
+    get_address_backends_from_config,
+    get_address_by_reference,
+    get_provider_by_attribute,
+    search_addresses,
+)
 from .missive import Missive
 from .providers.base.common import BaseProviderCommon
 from .sender import MissiveSender
@@ -27,6 +32,7 @@ __all__ = [
     "send_missive",
     "format_phone_international",
     "get_address_backends_from_config",
+    "get_address_by_reference",
     "search_addresses",
     "get_address_backend_by_attribute",
     "describe_address_backends",
@@ -91,19 +97,20 @@ def send_missive(
     missive_type = missive_type.upper()
 
     # Validate required fields based on type
-    if missive_type == "EMAIL":
-        if not recipient_email:
-            raise ValueError("recipient_email required for EMAIL missives")
-        if not subject:
-            raise ValueError("subject required for EMAIL missives")
-    elif missive_type in ("SMS", "VOICE_CALL"):
-        if not recipient_phone:
-            raise ValueError(f"recipient_phone required for {missive_type} missives")
-    elif missive_type in ("POSTAL", "POSTAL_REGISTERED"):
-        if not recipient and not recipient_email:
-            raise ValueError(
-                f"recipient or recipient_email required for {missive_type} missives"
-            )
+    if missive_type == "EMAIL" and not recipient_email:
+        raise ValueError("recipient_email required for EMAIL missives")
+    if missive_type == "EMAIL" and not subject:
+        raise ValueError("subject required for EMAIL missives")
+    if missive_type in ("SMS", "VOICE_CALL") and not recipient_phone:
+        raise ValueError(f"recipient_phone required for {missive_type} missives")
+    if (
+        missive_type in ("POSTAL", "POSTAL_REGISTERED")
+        and not recipient
+        and not recipient_email
+    ):
+        raise ValueError(
+            f"recipient or recipient_email required for {missive_type} missives"
+        )
 
     # Create missive object
     missive = Missive(

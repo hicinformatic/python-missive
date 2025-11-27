@@ -96,34 +96,17 @@ class InAppNotificationProvider(BaseProvider):
         Returns:
             Dict with status, availability, etc.
         """
-        clock = getattr(self, "_clock", None)
-        last_check = clock() if callable(clock) else datetime.now(timezone.utc)
-
-        # Local system, always available
-        return {
-            "status": "operational",
-            "is_available": True,
-            "services": self._get_services(),
-            "credits": {
-                "type": "unlimited",
-                "remaining": None,
-                "currency": "",
-                "limit": None,
-                "percentage": None,
-            },
-            "rate_limits": {
-                "per_second": None,  # No limit
-            },
-            "sla": {
-                "uptime_percentage": 100.0,  # Local
-            },
-            "last_check": last_check,
-            "warnings": [],
-            "details": {
+        return self._build_generic_service_status(
+            status="operational",
+            is_available=True,
+            credits_type="unlimited",
+            rate_limits={"per_second": None},
+            sla={"uptime_percentage": 100.0},
+            details={
                 "provider_type": "In-App (Local)",
                 "note": "Notifications stockées en base de données",
             },
-        }
+        )
 
 
 __all__ = ["InAppNotificationProvider"]

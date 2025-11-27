@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import time
+
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, cast
+
+
+_ADDRESS_COMPONENT_KEYS = (
+    "address_line1",
+    "address_line2",
+    "address_line3",
+    "city",
+    "postal_code",
+    "state",
+    "country",
+)
 
 
 class BaseAddressBackend:
@@ -11,6 +24,316 @@ class BaseAddressBackend:
     Provides a generic interface for address validation, geocoding,
     and normalization across different providers.
     """
+
+    _requests_error_message = "requests package not installed"
+
+    def _build_empty_address_payload(
+        self,
+        *,
+        address_reference: Optional[str] = None,
+        error: str = "No data",
+        include_coordinates: bool = True,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "address_line1": None,
+            "address_line2": None,
+            "address_line3": None,
+            "city": None,
+            "postal_code": None,
+            "state": None,
+            "country": None,
+            "formatted_address": None,
+            "confidence": 0.0,
+            "errors": [error],
+        }
+        if include_coordinates:
+            payload["latitude"] = None
+            payload["longitude"] = None
+        if address_reference is not None:
+            payload["address_reference"] = address_reference
+        return payload
+
+    @staticmethod
+    def _build_validation_failure(
+        *,
+        error: str,
+        suggestions: Optional[List[Dict[str, Any]]] = None,
+        warnings: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "is_valid": False,
+            "normalized_address": {},
+            "confidence": 0.0,
+            "suggestions": suggestions or [],
+            "warnings": warnings or [],
+            "errors": [error],
+        }
+
+    @staticmethod
+    def _build_geocode_failure(error: str) -> Dict[str, Any]:
+        return {
+            "latitude": None,
+            "longitude": None,
+            "accuracy": None,
+            "confidence": 0.0,
+            "formatted_address": None,
+            "errors": [error],
+        }
+
+    @staticmethod
+    def _build_address_string(
+        address_line1: Optional[str] = None,
+        address_line2: Optional[str] = None,
+        address_line3: Optional[str] = None,
+        city: Optional[str] = None,
+        postal_code: Optional[str] = None,
+        state: Optional[str] = None,
+        country: Optional[str] = None,
+    ) -> str:
+        """Join address components into a single query string."""
+        parts = [
+            part
+            for part in (
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
+            if part
+        ]
+        return ", ".join(parts)
+
+    def _resolve_query_string(
+        self,
+        query: Optional[str],
+        *,
+        address_line1: Optional[str] = None,
+        address_line2: Optional[str] = None,
+        address_line3: Optional[str] = None,
+        city: Optional[str] = None,
+        postal_code: Optional[str] = None,
+        state: Optional[str] = None,
+        country: Optional[str] = None,
+    ) -> str:
+        """Return final query string by preferring free-text query over components."""
+        if query:
+            return query.strip()
+        candidate = self._build_address_string(
+            address_line1=address_line1,
+            address_line2=address_line2,
+            address_line3=address_line3,
+            city=city,
+            postal_code=postal_code,
+            state=state,
+            country=country,
+        )
+        return candidate.strip()
+
+    def _ensure_query_string(
+        self,
+        *,
+        query: Optional[str],
+        components: Mapping[str, Any],
+        failure_builder: Callable[[str], Dict[str, Any]],
+        empty_error: str = "Address query is empty",
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Resolve a query and return a fallback payload when missing."""
+        query_string = self._resolve_query_string(query, **components)
+        if not query_string:
+            return None, failure_builder(empty_error)
+        return query_string, None
+
+    def _resolve_components_query(
+        self,
+        *,
+        query: Optional[str],
+        context: Mapping[str, Any],
+        failure_builder: Callable[[str], Dict[str, Any]],
+        empty_error: str = "Address query is empty",
+    ) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Extract address components from a context and resolve the query."""
+        components = self._extract_address_components(context)
+        return self._ensure_query_string(
+            query=query,
+            components=components,
+            failure_builder=failure_builder,
+            empty_error=empty_error,
+        )
+
+    def _execute_geocode_flow(
+        self,
+        *,
+        query: Optional[str],
+        context: Mapping[str, Any],
+        failure_builder: Callable[[str], Dict[str, Any]],
+        request_callable: Callable[[str], Dict[str, Any]],
+        result_handler: Callable[[Dict[str, Any], str], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Common wrapper for geocode flows that share the same structure."""
+        query_string, failure = self._resolve_components_query(
+            query=query, context=context, failure_builder=failure_builder
+        )
+        if failure:
+            return failure
+
+        # After checking failure is None, query_string is guaranteed to be str
+        assert query_string is not None
+        result = request_callable(query_string)
+        if isinstance(result, dict) and "error" in result:
+            return failure_builder(result["error"])
+
+        return result_handler(result, query_string)
+
+    def _feature_validation_payload(
+        self,
+        *,
+        features: List[Dict[str, Any]],
+        extractor: Callable[[Dict[str, Any]], Dict[str, Any]],
+        formatted_getter: Callable[[Dict[str, Any]], str],
+        confidence_getter: Callable[[Dict[str, Any], Dict[str, Any]], float],
+        suggestion_formatter: Optional[
+            Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
+        ] = None,
+        valid_threshold: float = 0.5,
+        warning_threshold: float = 0.7,
+        missing_error: str = "No address found",
+        max_suggestions: int = 4,
+    ) -> Dict[str, Any]:
+        """Build validation payload from generic geocoding features."""
+
+        if not features:
+            return self._build_validation_failure(error=missing_error)
+
+        primary_feature = features[0]
+        normalized = extractor(primary_feature)
+        confidence = float(confidence_getter(primary_feature, normalized))
+        normalized["confidence"] = confidence
+
+        is_valid = confidence >= valid_threshold
+        suggestions: List[Dict[str, Any]] = []
+        if not is_valid and len(features) > 1:
+            for feature in features[1 : max_suggestions + 1]:
+                suggestion_payload = extractor(feature)
+                suggestion_confidence = float(
+                    confidence_getter(feature, suggestion_payload)
+                )
+                if suggestion_formatter:
+                    suggestion = suggestion_formatter(feature, suggestion_payload)
+                else:
+                    suggestion = {
+                        "formatted_address": formatted_getter(feature),
+                        "confidence": suggestion_confidence,
+                        "latitude": suggestion_payload.get("latitude"),
+                        "longitude": suggestion_payload.get("longitude"),
+                    }
+                suggestions.append(suggestion)
+
+        warnings: List[str] = []
+        if confidence < warning_threshold:
+            warnings.append("Low confidence match")
+
+        return {
+            "is_valid": is_valid,
+            "normalized_address": normalized,
+            "confidence": confidence,
+            "suggestions": suggestions,
+            "warnings": warnings,
+            "errors": [],
+            "address_reference": normalized.get("address_reference"),
+        }
+
+    def _feature_geocode_payload(
+        self,
+        *,
+        features: List[Dict[str, Any]],
+        extractor: Callable[[Dict[str, Any]], Dict[str, Any]],
+        formatted_getter: Callable[[Dict[str, Any]], str],
+        accuracy_getter: Callable[[Dict[str, Any], Dict[str, Any]], str],
+        confidence_getter: Callable[[Dict[str, Any], Dict[str, Any]], float],
+        missing_error: str = "No address found",
+    ) -> Dict[str, Any]:
+        """Build geocode payload from generic geocoding features."""
+
+        if not features:
+            return self._build_geocode_failure(error=missing_error)
+
+        feature = features[0]
+        normalized = extractor(feature)
+        accuracy = accuracy_getter(feature, normalized)
+        confidence = confidence_getter(feature, normalized)
+
+        return {
+            **normalized,
+            "latitude": normalized.get("latitude"),
+            "longitude": normalized.get("longitude"),
+            "accuracy": accuracy,
+            "confidence": confidence,
+            "formatted_address": formatted_getter(feature),
+            "address_reference": normalized.get("address_reference"),
+            "errors": [],
+        }
+
+    def _perform_get_request(
+        self,
+        url: str,
+        params: Dict[str, Any],
+        *,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Execute a GET request with consistent error handling."""
+        try:
+            import requests
+        except ImportError:
+            return {"error": self._requests_error_message}
+
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            return cast(Dict[str, Any], response.json())
+        except requests.exceptions.HTTPError as exc:
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("error", {}).get("message", str(exc))
+            except Exception:
+                error_msg = str(exc)
+            return {"error": error_msg}
+        except requests.exceptions.RequestException as exc:
+            return {"error": str(exc)}
+
+    def _request_json(
+        self,
+        base_url: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        *,
+        default_params: Optional[Dict[str, Any]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Helper to perform GET requests with shared parameter merging."""
+        url = f"{base_url}{endpoint}"
+        request_params: Dict[str, Any] = dict(default_params or {})
+        if params:
+            request_params.update(params)
+        return self._perform_get_request(url, request_params, headers=headers)
+
+    def _extract_address_components(
+        self, context: Mapping[str, Any]
+    ) -> Dict[str, Optional[str]]:
+        """Extract standardized address component kwargs from a context dict."""
+        return {key: context.get(key) for key in _ADDRESS_COMPONENT_KEYS}
+
+    def _rate_limit_with_interval(
+        self, attr_name: str, min_interval: float
+    ) -> None:
+        """Throttle outbound requests by sleeping when needed."""
+        last_time = getattr(self, attr_name, 0.0)
+        now = time.time()
+        if now - last_time < min_interval:
+            time.sleep(min_interval - (now - last_time))
+        setattr(self, attr_name, time.time())
 
     name: str = "base"
     display_name: Optional[str] = None
@@ -153,17 +476,7 @@ class BaseAddressBackend:
             - confidence (float): Confidence score (0.0-1.0).
             - address_reference (str, optional): Reference ID for reverse lookup (e.g., place_id, osm_id).
         """
-        return {
-            "address_line1": None,
-            "address_line2": None,
-            "city": None,
-            "postal_code": None,
-            "state": None,
-            "country": None,
-            "formatted_address": None,
-            "confidence": 0.0,
-            "errors": ["reverse_geocode() not implemented"],
-        }
+        return self._build_empty_address_payload(error="reverse_geocode() not implemented")
 
     def get_address_by_reference(
         self, address_reference: str, **kwargs: Any
@@ -190,21 +503,10 @@ class BaseAddressBackend:
             - address_reference (str): The reference ID used for lookup.
             - errors (list): List of errors if lookup fails.
         """
-        return {
-            "address_line1": None,
-            "address_line2": None,
-            "address_line3": None,
-            "city": None,
-            "postal_code": None,
-            "state": None,
-            "country": None,
-            "formatted_address": None,
-            "latitude": None,
-            "longitude": None,
-            "confidence": 0.0,
-            "address_reference": address_reference,
-            "errors": ["get_address_by_reference() not implemented"],
-        }
+        return self._build_empty_address_payload(
+            address_reference=address_reference,
+            error="get_address_by_reference() not implemented",
+        )
 
     def normalize_address(
         self,

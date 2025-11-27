@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import time
-from typing import Any, Dict, Optional, cast
-
-import requests
+from contextlib import suppress
+from typing import Any, Dict, Optional
 
 from .base import BaseAddressBackend
 
@@ -41,71 +39,19 @@ class MapsCoAddressBackend(BaseAddressBackend):
         self._base_url = self._config.get("MAPS_CO_BASE_URL", "https://geocode.maps.co")
         self._last_request_time = 0.0
 
-    def _build_address_string(
-        self,
-        address_line1: Optional[str] = None,
-        address_line2: Optional[str] = None,
-        address_line3: Optional[str] = None,
-        city: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-    ) -> str:
-        """Build a query string from address components."""
-        parts = []
-        if address_line1:
-            parts.append(address_line1)
-        if address_line2:
-            parts.append(address_line2)
-        if address_line3:
-            parts.append(address_line3)
-        if city:
-            parts.append(city)
-        if postal_code:
-            parts.append(postal_code)
-        if state:
-            parts.append(state)
-        if country:
-            parts.append(country)
-        return ", ".join(filter(None, parts))
-
-    def _rate_limit(self) -> None:
-        """Respect Maps.co rate limit (1 request per second to avoid 429)."""
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < 1.0:  # 1 second delay
-            time.sleep(1.0 - time_since_last)
-        self._last_request_time = time.time()
-
     def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    ) -> Any:
         """Make a request to the Maps.co API."""
-        self._rate_limit()
+        self._rate_limit_with_interval("_last_request_time", 1.0)
 
-        url = f"{self._base_url}{endpoint}"
-
-        request_params: Dict[str, Any] = {"api_key": self._api_key, "format": "json"}
-        if params:
-            request_params.update(params)
-
-        try:
-            response = requests.get(url, params=request_params, timeout=10)
-            response.raise_for_status()
-            json_response = response.json()
-            # Maps.co returns list for /search, dict for /reverse
-            return json_response
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 429:
-                return {"error": "Rate limit exceeded. Please wait and retry."}
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("error", str(e))
-            except Exception:
-                error_msg = str(e)
-            return {"error": error_msg}
-        except requests.exceptions.RequestException as e:
-            return {"error": str(e)}
+        default_params: Dict[str, Any] = {"api_key": self._api_key, "format": "json"}
+        return self._request_json(
+            self._base_url,
+            endpoint,
+            params,
+            default_params=default_params,
+        )
 
     def _extract_address_from_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Extract address components from a Maps.co API result."""
@@ -131,15 +77,11 @@ class MapsCoAddressBackend(BaseAddressBackend):
         latitude = None
         longitude = None
         if "lat" in result and result["lat"]:
-            try:
+            with suppress(ValueError, TypeError):
                 latitude = float(result["lat"])
-            except (ValueError, TypeError):
-                pass
         if "lon" in result and result["lon"]:
-            try:
+            with suppress(ValueError, TypeError):
                 longitude = float(result["lon"])
-            except (ValueError, TypeError):
-                pass
 
         return {
             "address_line1": address_line1 or "",
@@ -179,28 +121,13 @@ class MapsCoAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using Maps.co search API."""
-        if query:
-            query_string = query
-        else:
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not query_string:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Address query is empty"],
-            }
+        query_string, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_validation_failure(error=msg),
+        )
+        if failure:
+            return failure
 
         params: Dict[str, Any] = {"q": query_string, "limit": 5}
         if country:
@@ -208,69 +135,32 @@ class MapsCoAddressBackend(BaseAddressBackend):
 
         result = self._make_request("/search", params)
 
-        if "error" in result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [result["error"]],
-            }
+        if isinstance(result, dict) and "error" in result:
+            return self._build_validation_failure(error=result["error"])
 
-        # Maps.co returns a list of results
-        if not isinstance(result, list):
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Invalid response format"],
-            }
+        features = result if isinstance(result, list) else []
 
-        if not result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
+        def _extract_feature(item: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_result(item)
+            payload["formatted_address"] = item.get("display_name", "")
+            return payload
 
-        best_match = result[0]
-        normalized = self._extract_address_from_result(best_match)
-
-        confidence = normalized.get("confidence", 0.0)
-        is_valid = confidence >= 0.5
-
-        suggestions = []
-        if not is_valid and len(result) > 1:
-            for item in result[1:5]:
-                suggestion = self._extract_address_from_result(item)
-                suggestions.append(
-                    {
-                        "formatted_address": item.get("display_name", ""),
-                        "confidence": suggestion.get("confidence", 0.0),
-                        "latitude": suggestion.get("latitude"),
-                        "longitude": suggestion.get("longitude"),
-                    }
-                )
-
-        warnings = []
-        if confidence < 0.7:
-            warnings.append("Low confidence match")
-
-        return {
-            "is_valid": is_valid,
-            "normalized_address": normalized,
-            "confidence": confidence,
-            "suggestions": suggestions,
-            "warnings": warnings,
-            "errors": [],
-            "address_reference": normalized.get("address_reference"),
-        }
+        return self._feature_validation_payload(
+            features=features,
+            extractor=_extract_feature,
+            formatted_getter=lambda item: item.get("display_name", ""),
+            confidence_getter=lambda _item, normalized: normalized.get("confidence", 0.0),
+            suggestion_formatter=lambda item, normalized: {
+                "formatted_address": item.get("display_name", ""),
+                "confidence": normalized.get("confidence", 0.0),
+                "latitude": normalized.get("latitude"),
+                "longitude": normalized.get("longitude"),
+            },
+            valid_threshold=0.5,
+            warning_threshold=0.7,
+            missing_error="No address found",
+            max_suggestions=4,
+        )
 
     def geocode(
         self,
@@ -285,67 +175,37 @@ class MapsCoAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using Maps.co."""
-        if query:
-            query_string = query
-        else:
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
+
+        def _request(query_string: str) -> Dict[str, Any]:
+            params: Dict[str, Any] = {"q": query_string, "limit": 1}
+            if country:
+                params["country"] = country.upper()
+            return self._make_request("/search", params)  # type: ignore[no-any-return]
+
+        def _handle(result: Dict[str, Any], _query: str) -> Dict[str, Any]:
+            features: list[Dict[str, Any]] = result if isinstance(result, list) else []
+
+            def _extract_feature(item: Dict[str, Any]) -> Dict[str, Any]:
+                payload = self._extract_address_from_result(item)
+                payload["formatted_address"] = item.get("display_name", "")
+                return payload
+
+            return self._feature_geocode_payload(
+                features=features,
+                extractor=_extract_feature,
+                formatted_getter=lambda item: item.get("display_name", ""),
+                accuracy_getter=lambda _item, _normalized: "ROOFTOP",
+                confidence_getter=lambda _item, normalized: normalized.get("confidence", 0.0),
+                missing_error="No address found",
             )
 
-        if not query_string:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["Address query is empty"],
-            }
-
-        params: Dict[str, Any] = {"q": query_string, "limit": 1}
-        if country:
-            params["country"] = country.upper()
-
-        result = self._make_request("/search", params)
-
-        if "error" in result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
-
-        if not isinstance(result, list) or not result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
-
-        best_match = result[0]
-        normalized = self._extract_address_from_result(best_match)
-
-        return {
-            "latitude": normalized.get("latitude"),
-            "longitude": normalized.get("longitude"),
-            "accuracy": "ROOFTOP",  # Maps.co doesn't provide explicit accuracy
-            "confidence": normalized.get("confidence", 0.0),
-            "formatted_address": best_match.get("display_name", ""),
-            "address_reference": normalized.get("address_reference"),
-            "errors": [],
-        }
+        return self._execute_geocode_flow(
+            query=query,
+            context=locals(),
+            failure_builder=self._build_geocode_failure,
+            request_callable=_request,
+            result_handler=_handle,
+        )
 
     def reverse_geocode(self, latitude: float, longitude: float, **kwargs: Any) -> Dict[str, Any]:
         """Reverse geocode coordinates to an address using Maps.co."""
@@ -356,39 +216,20 @@ class MapsCoAddressBackend(BaseAddressBackend):
         result = self._make_request("/reverse", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": latitude,
-                "longitude": longitude,
-                "confidence": 0.0,
-                "address_reference": None,
-                "errors": [result["error"]],
-            }
+            payload = self._build_empty_address_payload(error=result["error"])
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            payload["address_reference"] = None
+            return payload
 
-        # Maps.co reverse geocoding returns a single result object (dict), not a list
         if not result or not isinstance(result, dict):
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": latitude,
-                "longitude": longitude,
-                "confidence": 0.0,
-                "address_reference": None,
-                "errors": ["Invalid response format"],
-            }
+            payload = self._build_empty_address_payload(
+                error="Invalid response format"
+            )
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            payload["address_reference"] = None
+            return payload
 
         normalized = self._extract_address_from_result(result)
 
@@ -407,24 +248,10 @@ class MapsCoAddressBackend(BaseAddressBackend):
 
         Maps.co uses Nominatim place_id for references.
         """
-        # Maps.co doesn't have a direct lookup by place_id endpoint
-        # We need to use the search with the place_id or use reverse geocoding
-        # For now, we'll return an error as Maps.co doesn't support direct lookup
-        return {
-            "address_line1": None,
-            "address_line2": None,
-            "address_line3": None,
-            "city": None,
-            "postal_code": None,
-            "state": None,
-            "country": None,
-            "formatted_address": None,
-            "latitude": None,
-            "longitude": None,
-            "confidence": 0.0,
-            "address_reference": address_reference,
-            "errors": [
+        return self._build_empty_address_payload(
+            address_reference=address_reference,
+            error=(
                 "Maps.co API does not support direct lookup by place_id. "
                 "Use reverse geocoding with coordinates instead."
-            ],
-        }
+            ),
+        )

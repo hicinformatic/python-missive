@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import time
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 from .base import BaseAddressBackend
 
@@ -37,40 +36,6 @@ class LocationIQAddressBackend(BaseAddressBackend):
         self._base_url = self._config.get("LOCATIONIQ_BASE_URL", "https://api.locationiq.com/v1")
         self._last_request_time = 0.0
 
-    def _build_address_string(
-        self,
-        address_line1: Optional[str] = None,
-        address_line2: Optional[str] = None,
-        address_line3: Optional[str] = None,
-        city: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-    ) -> str:
-        """Build a query string from address components."""
-        parts = []
-        if address_line1:
-            parts.append(address_line1)
-        if address_line2:
-            parts.append(address_line2)
-        if city:
-            parts.append(city)
-        if postal_code:
-            parts.append(postal_code)
-        if state:
-            parts.append(state)
-        if country:
-            parts.append(country)
-        return ", ".join(filter(None, parts))
-
-    def _rate_limit(self) -> None:
-        """Respect rate limit (2 requests per second)."""
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < 0.5:
-            time.sleep(0.5 - time_since_last)
-        self._last_request_time = time.time()
-
     def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -80,7 +45,7 @@ class LocationIQAddressBackend(BaseAddressBackend):
         except ImportError:
             return {"error": "requests package not installed"}
 
-        self._rate_limit()
+        self._rate_limit_with_interval("_last_request_time", 0.5)
 
         url = f"{self._base_url}{endpoint}"
 
@@ -141,28 +106,13 @@ class LocationIQAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using LocationIQ."""
-        if query:
-            query_string = query
-        else:
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not query_string:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Address query is empty"],
-            }
+        query_string, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_validation_failure(error=msg),
+        )
+        if failure:
+            return failure
 
         params: Dict[str, Any] = {"q": query_string, "limit": 5, "addressdetails": 1}
         if country:
@@ -171,83 +121,43 @@ class LocationIQAddressBackend(BaseAddressBackend):
         result = self._make_request("/search.php", params)
 
         if "error" in result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [result["error"]],
-            }
+            return self._build_validation_failure(error=result["error"])
 
-        # LocationIQ returns a list
+        results: List[Dict[str, Any]]
         if isinstance(result, list):
             results = result
         else:
             results = [result] if result else []
 
-        if not results:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
+        def _extract_with_coordinates(feature: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_result(feature)
+            lat = feature.get("lat")
+            lon = feature.get("lon")
+            if lat is not None and lon is not None:
+                payload["latitude"] = float(lat)
+                payload["longitude"] = float(lon)
+            return payload
 
-        best_match = results[0]
-        normalized = self._extract_address_from_result(best_match)
-
-        # Extract coordinates
-        lat = best_match.get("lat")
-        lon = best_match.get("lon")
-        if lat is not None and lon is not None:
-            normalized["latitude"] = float(lat)
-            normalized["longitude"] = float(lon)
-
-        # LocationIQ provides importance score (0-1)
-        importance = best_match.get("importance", 0.0)
-        confidence = min(importance, 1.0)
-        normalized["confidence"] = confidence
-
-        is_valid = confidence >= 0.5
-
-        suggestions = []
-        if not is_valid and len(results) > 1:
-            for result_item in results[1:5]:
-                suggestion_normalized = self._extract_address_from_result(result_item)
-                suggestion_lat = result_item.get("lat")
-                suggestion_lon = result_item.get("lon")
-                suggestion_importance = result_item.get("importance", 0.0)
-
-                suggestion_data = {
-                    "formatted_address": result_item.get("display_name", ""),
-                    "confidence": min(suggestion_importance, 1.0),
-                }
-                if suggestion_lat is not None and suggestion_lon is not None:
-                    suggestion_data["latitude"] = float(suggestion_lat)
-                    suggestion_data["longitude"] = float(suggestion_lon)
-                suggestion_data.update(suggestion_normalized)
-                suggestions.append(suggestion_data)
-
-        warnings = []
-        if confidence < 0.7:
-            warnings.append("Low confidence match")
-
-        place_id = best_match.get("place_id")
-
-        return {
-            "is_valid": is_valid,
-            "normalized_address": normalized,
-            "confidence": confidence,
-            "suggestions": suggestions,
-            "warnings": warnings,
-            "errors": [],
-            "address_reference": (
-                str(place_id) if place_id is not None else normalized.get("address_reference")
+        payload = self._feature_validation_payload(
+            features=results,
+            extractor=_extract_with_coordinates,
+            formatted_getter=lambda feature: feature.get("display_name", ""),
+            confidence_getter=lambda feature, _normalized: float(
+                min(feature.get("importance", 0.0), 1.0)
             ),
-        }
+            suggestion_formatter=lambda feature, normalized_suggestion: {
+                "formatted_address": feature.get("display_name", ""),
+                "confidence": float(min(feature.get("importance", 0.0), 1.0)),
+                "latitude": normalized_suggestion.get("latitude"),
+                "longitude": normalized_suggestion.get("longitude"),
+            },
+            valid_threshold=0.5,
+            warning_threshold=0.7,
+            missing_error="No address found",
+            max_suggestions=4,
+        )
+
+        return payload
 
     def geocode(
         self,
@@ -262,70 +172,13 @@ class LocationIQAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using LocationIQ."""
-        if query:
-            query_string = query
-        else:
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
 
-        if not query_string:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["Address query is empty"],
-            }
+        def _request(query_string: str) -> Dict[str, Any]:
+            params: Dict[str, Any] = {"q": query_string, "limit": 1, "addressdetails": 1}
+            if country:
+                params["countrycodes"] = country.lower()
+            return self._make_request("/search.php", params)
 
-        params: Dict[str, Any] = {"q": query_string, "limit": 1, "addressdetails": 1}
-        if country:
-            params["countrycodes"] = country.lower()
-
-        result = self._make_request("/search.php", params)
-
-        if "error" in result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
-
-        if isinstance(result, list):
-            results = result
-        else:
-            results = [result] if result else []
-
-        if not results:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
-
-        feature = results[0]
-        normalized = self._extract_address_from_result(feature)
-
-        lat = feature.get("lat")
-        lon = feature.get("lon")
-        latitude = float(lat) if lat is not None else None
-        longitude = float(lon) if lon is not None else None
-
-        # Determine accuracy from address type
-        address_type = feature.get("type", "")
         accuracy_map = {
             "house": "ROOFTOP",
             "building": "ROOFTOP",
@@ -335,23 +188,43 @@ class LocationIQAddressBackend(BaseAddressBackend):
             "town": "CITY",
             "village": "CITY",
         }
-        accuracy = accuracy_map.get(address_type, "APPROXIMATE")
 
-        importance = feature.get("importance", 0.0)
-        confidence = min(importance, 1.0)
+        def _handle(result: Dict[str, Any], _query: str) -> Dict[str, Any]:
+            if isinstance(result, list):
+                results = result
+            else:
+                results = [result] if result else []
 
-        place_id = feature.get("place_id")
+            def _extract_with_coordinates(feature: Dict[str, Any]) -> Dict[str, Any]:
+                payload = self._extract_address_from_result(feature)
+                lat = feature.get("lat")
+                lon = feature.get("lon")
+                if lat is not None:
+                    payload["latitude"] = float(lat)
+                if lon is not None:
+                    payload["longitude"] = float(lon)
+                return payload
 
-        return {
-            **normalized,
-            "latitude": latitude,
-            "longitude": longitude,
-            "accuracy": accuracy,
-            "confidence": confidence,
-            "formatted_address": feature.get("display_name", ""),
-            "address_reference": str(place_id) if place_id is not None else None,
-            "errors": [],
-        }
+            return self._feature_geocode_payload(
+                features=results,
+                extractor=_extract_with_coordinates,
+                formatted_getter=lambda feature: feature.get("display_name", ""),
+                accuracy_getter=lambda feature, _normalized: accuracy_map.get(
+                    feature.get("type", ""), "APPROXIMATE"
+                ),
+                confidence_getter=lambda feature, _normalized: float(
+                    min(feature.get("importance", 0.0), 1.0)
+                ),
+                missing_error="No address found",
+            )
+
+        return self._execute_geocode_flow(
+            query=query,
+            context=locals(),
+            failure_builder=self._build_geocode_failure,
+            request_callable=_request,
+            result_handler=_handle,
+        )
 
     def reverse_geocode(self, latitude: float, longitude: float, **kwargs: Any) -> Dict[str, Any]:
         """Reverse geocode coordinates to an address using LocationIQ."""
@@ -366,19 +239,7 @@ class LocationIQAddressBackend(BaseAddressBackend):
         result = self._make_request("/reverse.php", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "latitude": None,
-                "longitude": None,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
+            return self._build_empty_address_payload(error=result["error"])
 
         normalized = self._extract_address_from_result(result)
         normalized["latitude"] = latitude
@@ -402,19 +263,9 @@ class LocationIQAddressBackend(BaseAddressBackend):
         """
         # LocationIQ place_id format is numeric
         # Without a direct lookup endpoint, we return an error
-        return {
-            "address_line1": None,
-            "address_line2": None,
-            "address_line3": None,
-            "city": None,
-            "postal_code": None,
-            "state": None,
-            "country": None,
-            "latitude": None,
-            "longitude": None,
-            "formatted_address": None,
-            "errors": [
+        return self._build_empty_address_payload(
+            error=(
                 "LocationIQ does not support direct lookup by reference ID. "
                 "Use reverse_geocode with coordinates instead."
-            ],
-        }
+            )
+        )

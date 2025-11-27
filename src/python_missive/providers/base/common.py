@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import csv
+from contextlib import suppress
 from collections.abc import MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
 
@@ -408,6 +409,90 @@ class BaseProviderCommon:
         clock = getattr(self, "_clock", None)
         return clock() if callable(clock) else datetime.now(timezone.utc)
 
+    def _build_generic_service_status(
+        self,
+        *,
+        credits_type: str,
+        rate_limits: Dict[str, Any],
+        credits_currency: str = "",
+        credits_remaining: Optional[Any] = None,
+        credits_limit: Optional[Any] = None,
+        credits_percentage: Optional[Any] = None,
+        warnings: Optional[List[str]] = None,
+        details: Optional[Dict[str, Any]] = None,
+        sla: Optional[Dict[str, Any]] = None,
+        status: str = "unknown",
+        is_available: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Build a standardized service status payload."""
+        return {
+            "status": status,
+            "is_available": is_available,
+            "services": self._get_services(),
+            "credits": {
+                "type": credits_type,
+                "remaining": credits_remaining,
+                "currency": credits_currency,
+                "limit": credits_limit,
+                "percentage": credits_percentage,
+            },
+            "rate_limits": rate_limits,
+            "sla": sla or {},
+            "last_check": self._get_last_check_time(),
+            "warnings": warnings or [],
+            "details": details or {},
+        }
+
+    def _risk_missing_missive_payload(self) -> Dict[str, Any]:
+        """Standard payload when no missive is available for risk analyses."""
+        return {
+            "risk_score": 100,
+            "risk_level": "critical",
+            "factors": {},
+            "recommendations": ["No missive to analyze"],
+            "should_send": False,
+        }
+
+    def _resolve_risk_target(
+        self, missive: Optional[Any]
+    ) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+        """Return the missive to analyze or a fallback payload if missing."""
+        target = missive if missive is not None else self.missive
+        if target is None:
+            return None, self._risk_missing_missive_payload()
+        return target, None
+
+    def _start_risk_analysis(
+        self, missive: Optional[Any]
+    ) -> Tuple[Optional[Any], Optional[Dict[str, Any]], Dict[str, Any], List[str], float]:
+        """Standardise the setup for risk analysis routines.
+
+        Returns:
+            Tuple of:
+                - target missive (or None if unavailable)
+                - fallback payload to return immediately if provided
+                - factors dict
+                - recommendations list
+                - starting risk score (float)
+        """
+        target, fallback = self._resolve_risk_target(missive)
+        if fallback is not None:
+            return None, fallback, {}, [], 0.0
+        return target, None, {}, [], 0.0
+
+    def _run_risk_analysis(
+        self,
+        missive: Optional[Any],
+        handler: Callable[[Any, Dict[str, Any], List[str], float], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Execute a provider-specific risk handler with shared pre-checks."""
+        target, fallback, factors, recommendations, total_risk = self._start_risk_analysis(
+            missive
+        )
+        if fallback is not None or target is None:
+            return fallback or self._risk_missing_missive_payload()
+        return handler(target, factors, recommendations, total_risk)
+
     def _handle_send_error(
         self, error: Exception, error_message: Optional[str] = None
     ) -> bool:
@@ -416,6 +501,41 @@ class BaseProviderCommon:
         self._update_status(MissiveStatus.FAILED, error_message=msg)
         self._create_event("failed", msg)
         return False
+
+    def _simulate_send(
+        self,
+        *,
+        prefix: str,
+        event_message: str,
+        status: MissiveStatus = MissiveStatus.SENT,
+        event_type: str = "sent",
+    ) -> bool:
+        """Simulate a successful send by updating status and logging an event."""
+        missive_id = getattr(self.missive, "id", "unknown") if self.missive else "unknown"
+        external_id = f"{prefix}_{missive_id}"
+        self._update_status(status, provider=self.name, external_id=external_id)
+        self._create_event(event_type, event_message)
+        return True
+
+    def _send_email_simulation(
+        self,
+        *,
+        prefix: str,
+        event_message: str,
+        recipient_field: str = "recipient_email",
+    ) -> bool:
+        """Validate recipient and simulate an email send."""
+        is_valid, error = self._validate_and_check_recipient(
+            recipient_field, "Email missing"
+        )
+        if not is_valid:
+            self._update_status(MissiveStatus.FAILED, error_message=error)
+            return False
+
+        try:
+            return self._simulate_send(prefix=prefix, event_message=event_message)
+        except Exception as exc:  # pragma: no cover - defensive
+            return self._handle_send_error(exc)
 
     def _validate_and_check_recipient(
         self, recipient_field: str, error_message: str
@@ -433,74 +553,68 @@ class BaseProviderCommon:
 
     def calculate_delivery_risk(self, missive: Optional[Any] = None) -> Dict[str, Any]:
         """Compute a delivery risk score for the given missive."""
-        target_missive = missive or self.missive
-        if not target_missive:
-            return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
-                "should_send": False,
-            }
 
-        factors: Dict[str, Any] = {}
-        recommendations = []
-        total_risk = 0.0
+        def _handler(
+            target_missive: Any,
+            factors: Dict[str, Any],
+            recommendations: List[str],
+            total_risk: float,
+        ) -> Dict[str, Any]:
+            missive_type = str(getattr(target_missive, "missive_type", "")).upper()
+            updated_risk = total_risk
 
-        missive_type = str(getattr(target_missive, "missive_type", "")).upper()
+            if missive_type == "EMAIL":
+                email = self._get_missive_value("get_recipient_email") or getattr(
+                    target_missive, "recipient_email", None
+                )
+                if email:
+                    email_validation = self.validate_email(email)
+                    factors["email_validation"] = email_validation
+                    updated_risk += email_validation["risk_score"] * 0.6
+                    recommendations.extend(email_validation.get("warnings", []))
 
-        if missive_type == "EMAIL":
-            email = self._get_missive_value("get_recipient_email") or getattr(
-                target_missive, "recipient_email", None
-            )
-            if email:
-                email_validation = self.validate_email(email)
-                factors["email_validation"] = email_validation
-                total_risk += email_validation["risk_score"] * 0.6
-                recommendations.extend(email_validation.get("warnings", []))
-
-        elif missive_type == "SMS":
-            if hasattr(self, "calculate_sms_delivery_risk"):
+            elif missive_type == "SMS" and hasattr(self, "calculate_sms_delivery_risk"):
                 sms_risk = self.calculate_sms_delivery_risk(target_missive)
                 factors["sms_risk"] = sms_risk
-                total_risk += sms_risk.get("risk_score", 0) * 0.6
+                updated_risk += sms_risk.get("risk_score", 0) * 0.6
                 recommendations.extend(sms_risk.get("recommendations", []))
 
-        elif missive_type == "BRANDED":
-            phone = self._get_missive_value("get_recipient_phone") or getattr(
-                target_missive, "recipient_phone", None
-            )
-            if phone:
-                phone_validation = self.validate_phone_number(phone)
-                factors["phone_validation"] = phone_validation
-                total_risk += phone_validation["risk_score"] * 0.6
-                recommendations.extend(phone_validation.get("warnings", []))
-
-        elif missive_type == "PUSH_NOTIFICATION":
-            if hasattr(self, "calculate_push_notification_delivery_risk"):
-                push_risk = self.calculate_push_notification_delivery_risk(
-                    target_missive
+            elif missive_type == "BRANDED":
+                phone = self._get_missive_value("get_recipient_phone") or getattr(
+                    target_missive, "recipient_phone", None
                 )
+                if phone:
+                    phone_validation = self.validate_phone_number(phone)
+                    factors["phone_validation"] = phone_validation
+                    updated_risk += phone_validation["risk_score"] * 0.6
+                    recommendations.extend(phone_validation.get("warnings", []))
+
+            elif missive_type == "PUSH_NOTIFICATION" and hasattr(
+                self, "calculate_push_notification_delivery_risk"
+            ):
+                push_risk = self.calculate_push_notification_delivery_risk(target_missive)
                 factors["push_notification_risk"] = push_risk
-                total_risk += push_risk.get("risk_score", 0) * 0.6
+                updated_risk += push_risk.get("risk_score", 0) * 0.6
                 recommendations.extend(push_risk.get("recommendations", []))
 
-        service_check = self.check_service_availability()
-        factors["service_availability"] = service_check
-        if not service_check.get("is_available"):
-            total_risk += 20
-            recommendations.append("Service temporarily unavailable")
+            service_check = self.check_service_availability()
+            factors["service_availability"] = service_check
+            if not service_check.get("is_available"):
+                updated_risk += 20
+                recommendations.append("Service temporarily unavailable")
 
-        risk_score = min(int(total_risk), 100)
-        risk_level = self._calculate_risk_level(risk_score)
+            risk_score = min(int(updated_risk), 100)
+            risk_level = self._calculate_risk_level(risk_score)
 
-        return {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations,
-            "should_send": risk_score < 70,
-        }
+            return {
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations,
+                "should_send": risk_score < 70,
+            }
+
+        return self._run_risk_analysis(missive, _handler)
 
     # ------------------------------------------------------------------
     # Geographic scope handling
@@ -533,28 +647,24 @@ class BaseProviderCommon:
         countries: set[str] = set()
         names: set[str] = set()
         if csv_path and csv_path.exists():
-            try:
-                with csv_path.open("r", encoding="utf-8") as fh:
-                    reader = csv.DictReader(fh)
-                    for row in reader:
-                        cca2 = (row.get("cca2") or "").upper()
-                        cca3 = (row.get("cca3") or "").upper()
-                        name_common = (row.get("name_common") or "").strip().lower()
-                        region = (row.get("region") or "").strip()
-                        subregion = (row.get("subregion") or "").strip()
-                        if cca2:
-                            countries.add(cca2)
-                        if cca3:
-                            countries.add(cca3)
-                        if name_common:
-                            names.add(name_common)
-                        if region:
-                            regions.add(region)
-                        if subregion:
-                            subregions.add(subregion)
-            except Exception:
-                # On parsing error, keep empty sets (validation will be lenient)
-                pass
+            with suppress(Exception), csv_path.open("r", encoding="utf-8") as fh:
+                reader = csv.DictReader(fh)
+                for row in reader:
+                    cca2 = (row.get("cca2") or "").upper()
+                    cca3 = (row.get("cca3") or "").upper()
+                    name_common = (row.get("name_common") or "").strip().lower()
+                    region = (row.get("region") or "").strip()
+                    subregion = (row.get("subregion") or "").strip()
+                    if cca2:
+                        countries.add(cca2)
+                    if cca3:
+                        countries.add(cca3)
+                    if name_common:
+                        names.add(name_common)
+                    if region:
+                        regions.add(region)
+                    if subregion:
+                        subregions.add(subregion)
 
         cls._COUNTRIES_INDEX = {
             "regions": regions,

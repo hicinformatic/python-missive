@@ -98,9 +98,8 @@ class MissiveSender:
             return True
         token_set_lower = {t.lower() for t in tokens}
         token_set_upper = {t.upper() for t in tokens}
-        if continent and continent.strip():
-            if continent.lower() in token_set_lower:
-                return True
+        if continent and continent.strip() and continent.lower() in token_set_lower:
+            return True
         if country and country.strip():
             c = country.strip()
             if c.lower() in token_set_lower or c.upper() in token_set_upper:

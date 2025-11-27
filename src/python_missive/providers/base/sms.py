@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
 
@@ -67,54 +67,50 @@ class BaseSMSMixin:
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Calculate delivery risk for SMS missives."""
-        target_missive = missive if missive is not None else self.missive
-        if not target_missive:
+
+        def _handler(
+            _target: Any,
+            factors: Dict[str, Any],
+            recommendations: List[str],
+            total_risk: float,
+        ) -> Dict[str, Any]:
+            phone = self._get_missive_value("get_recipient_phone")
+            if not phone:
+                phone = self._get_missive_value("recipient_phone")
+
+            phone_validation: Optional[Dict[str, Any]] = None
+            risk_total = total_risk
+
+            if not phone:
+                recommendations.append("Recipient phone missing")
+                risk_total = 100.0
+            else:
+                phone_str = str(phone)
+                phone_validation = self.validate_phone_number(phone_str)
+                factors["phone_validation"] = phone_validation
+                risk_total += phone_validation.get("risk_score", 0)
+                recommendations.extend(phone_validation.get("warnings", []))
+
+                if not phone_validation.get("is_valid", True):
+                    risk_total = max(risk_total, 80)
+
+            risk_score = min(int(risk_total), 100)
+            risk_level = self._calculate_risk_level(risk_score)
+
+            phone_is_valid = (
+                phone_validation.get("is_valid", True) if phone_validation else False
+            )
+            should_send = risk_score < 70 and phone_is_valid
+
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
-                "should_send": False,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations,
+                "should_send": should_send,
             }
 
-        factors: Dict[str, Any] = {}
-        recommendations: list[str] = []
-        total_risk = 0.0
-
-        phone = self._get_missive_value("get_recipient_phone")
-        if not phone:
-            phone = self._get_missive_value("recipient_phone")
-
-        phone_validation: Optional[Dict[str, Any]] = None
-
-        if not phone:
-            recommendations.append("Recipient phone missing")
-            total_risk = 100
-        else:
-            phone_str = str(phone)
-            phone_validation = self.validate_phone_number(phone_str)
-            factors["phone_validation"] = phone_validation
-            total_risk += phone_validation.get("risk_score", 0)
-            recommendations.extend(phone_validation.get("warnings", []))
-
-            if not phone_validation.get("is_valid", True):
-                total_risk = max(total_risk, 80)
-
-        risk_score = min(int(total_risk), 100)
-        risk_level = self._calculate_risk_level(risk_score)
-
-        phone_is_valid = (
-            phone_validation.get("is_valid", True) if phone_validation else False
-        )
-        should_send = risk_score < 70 and phone_is_valid
-
-        return {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations,
-            "should_send": should_send,
-        }
+        return self._run_risk_analysis(missive, _handler)
 
     def validate_phone_number(
         self, phone: str, country_code: str = "FR"

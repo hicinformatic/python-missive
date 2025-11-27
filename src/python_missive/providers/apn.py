@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..status import MissiveStatus
 from .base import BaseProvider
@@ -95,56 +95,52 @@ class APNProvider(BaseProvider):
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Calculate delivery risk for push notification."""
-        target_missive = missive if missive is not None else self.missive
-        if not target_missive:
+
+        def _handler(
+            target_missive: Any,
+            factors: Dict[str, Any],
+            recommendations: List[str],
+            total_risk: float,
+        ) -> Dict[str, Any]:
+            recipient = getattr(target_missive, "recipient", None)
+            risk_total = total_risk
+            if not recipient:
+                recommendations.append("Recipient not defined")
+                risk_total = 100.0
+            else:
+                metadata = getattr(recipient, "metadata", {}) or {}
+                device_token = metadata.get("apn_device_token")
+                if not device_token:
+                    recommendations.append("Missing APN device token")
+                    risk_total = 100.0
+                else:
+                    factors["device_token_present"] = True
+                    factors["device_token_length"] = len(device_token)
+                    if len(device_token) != 64:
+                        recommendations.append(
+                            "Device token format is invalid (expected 64 characters)"
+                        )
+                        risk_total = max(risk_total, 90)
+
+            service_check = self.check_service_availability()
+            factors["service_availability"] = service_check
+            if service_check.get("is_available") is False:
+                risk_total += 20
+                recommendations.append("Service temporarily unavailable")
+
+            risk_score = min(int(risk_total), 100)
+            risk_level = self._calculate_risk_level(risk_score)
+            should_send = risk_total < 70
+
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations,
+                "should_send": should_send,
             }
 
-        factors: Dict[str, Any] = {}
-        recommendations = []
-        total_risk = 0.0
-
-        recipient = getattr(target_missive, "recipient", None)
-        if not recipient:
-            recommendations.append("Recipient not defined")
-            total_risk = 100
-        else:
-            metadata = getattr(recipient, "metadata", {}) or {}
-            device_token = metadata.get("apn_device_token")
-            if not device_token:
-                recommendations.append("Missing APN device token")
-                total_risk = 100
-            else:
-                factors["device_token_present"] = True
-                factors["device_token_length"] = len(device_token)
-                if len(device_token) != 64:
-                    recommendations.append(
-                        "Device token format is invalid (expected 64 characters)"
-                    )
-                    total_risk = max(total_risk, 90)
-
-        service_check = self.check_service_availability()
-        factors["service_availability"] = service_check
-        if service_check.get("is_available") is False:
-            total_risk += 20
-            recommendations.append("Service temporarily unavailable")
-
-        risk_score = min(int(total_risk), 100)
-        risk_level = self._calculate_risk_level(risk_score)
-
-        should_send = total_risk < 70
-
-        return {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations,
-            "should_send": should_send,
-        }
+        return self._run_risk_analysis(missive, _handler)
 
     def handle_webhook(
         self,

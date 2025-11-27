@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..status import MissiveStatus
 from .base import BaseProvider
@@ -145,64 +145,60 @@ class AR24Provider(BaseProvider):
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Evaluate whether the missive can be safely sent via AR24."""
-        target_missive = missive if missive is not None else self.missive
-        if not target_missive:
+
+        def _handler(
+            target_missive: Any,
+            factors: Dict[str, Any],
+            recommendations: List[str],
+            total_risk: float,
+        ) -> Dict[str, Any]:
+            recipient = getattr(target_missive, "recipient", None)
+            risk_total = total_risk
+            if not recipient:
+                recommendations.append("Recipient not defined")
+                risk_total = 100.0
+            else:
+                recipient_email = getattr(recipient, "email", None)
+                if not recipient_email:
+                    recommendations.append("Recipient email required for AR24 LRE")
+                    risk_total = 100.0
+                else:
+                    factors["recipient_email"] = recipient_email
+
+                address_line1 = getattr(recipient, "address_line1", None)
+                postal_code = getattr(recipient, "postal_code", None)
+                city = getattr(recipient, "city", None)
+
+                if not address_line1:
+                    recommendations.append("Postal address missing (recommended for AR24)")
+                    risk_total += 20
+                if not postal_code or not city:
+                    recommendations.append("Postal code and city missing")
+                    risk_total += 20
+
+            service_check = self.check_service_availability()
+            factors["service_availability"] = service_check
+            if service_check.get("is_available") is False:
+                risk_total += 20
+                recommendations.append("Service temporarily unavailable")
+
+            risk_score = min(int(risk_total), 100)
+            risk_level = self._calculate_risk_level(risk_score)
+
+            should_send = (
+                risk_score < 70
+                and "Recipient email required for AR24 LRE" not in recommendations
+            )
+
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
-                "should_send": False,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations,
+                "should_send": should_send,
             }
 
-        factors: Dict[str, Any] = {}
-        recommendations: list[str] = []
-        total_risk = 0.0
-
-        recipient = getattr(target_missive, "recipient", None)
-        if not recipient:
-            recommendations.append("Recipient not defined")
-            total_risk = 100
-        else:
-            recipient_email = getattr(recipient, "email", None)
-            if not recipient_email:
-                recommendations.append("Recipient email required for AR24 LRE")
-                total_risk = 100
-            else:
-                factors["recipient_email"] = recipient_email
-
-            address_line1 = getattr(recipient, "address_line1", None)
-            postal_code = getattr(recipient, "postal_code", None)
-            city = getattr(recipient, "city", None)
-
-            if not address_line1:
-                recommendations.append("Postal address missing (recommended for AR24)")
-                total_risk += 20
-            if not postal_code or not city:
-                recommendations.append("Postal code and city missing")
-                total_risk += 20
-
-        service_check = self.check_service_availability()
-        factors["service_availability"] = service_check
-        if service_check.get("is_available") is False:
-            total_risk += 20
-            recommendations.append("Service temporarily unavailable")
-
-        risk_score = min(int(total_risk), 100)
-        risk_level = self._calculate_risk_level(risk_score)
-
-        should_send = (
-            risk_score < 70
-            and "Recipient email required for AR24 LRE" not in recommendations
-        )
-
-        return {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations,
-            "should_send": should_send,
-        }
+        return self._run_risk_analysis(missive, _handler)
 
 
 __all__ = ["AR24Provider"]

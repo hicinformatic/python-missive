@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
+from ._attachments import AttachmentMimeTypeMixin
 
 POSTAL_SERVICE_VARIANTS = [
     "postal",
@@ -52,7 +54,7 @@ BASE_POSTAL_DEFAULTS = {
 }
 
 
-class BasePostalMixin:
+class BasePostalMixin(AttachmentMimeTypeMixin):
     """Postal mail-specific functionality mixin."""
 
     # auto-populate service attributes and config field lists
@@ -61,9 +63,7 @@ class BasePostalMixin:
         defaults = BASE_POSTAL_DEFAULTS if _variant == "postal" else None
         for field in POSTAL_SERVICE_FIELDS:
             attr_name = f"{prefix}{field}"
-            locals()[attr_name] = (
-                defaults.get(field, None) if defaults is not None else None
-            )
+            locals()[attr_name] = defaults.get(field) if defaults is not None else None
         config_fields_attr = f"{prefix}config_fields"
         config_fields_list: list[str] = []
         for field in POSTAL_SERVICE_FIELDS:
@@ -205,27 +205,52 @@ class BasePostalMixin:
             "details": {},
         }
 
-    def send_postal(self, **kwargs) -> bool:
-        """Send a postal missive. Override in subclasses."""
-        recipient_address = self._get_missive_value("get_recipient_address")
-        if not recipient_address:
-            recipient_address = self._get_missive_value("recipient_address")
+    def _send_postal_service(
+        self,
+        *,
+        service: str,
+        is_registered: bool = False,
+        requires_signature: bool = False,
+        **kwargs,
+    ) -> bool:
+        """Subclasses must implement the concrete postal delivery."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _send_postal_service()."
+        )
 
+    def _require_postal_address(self) -> bool:
+        recipient_address = self._get_missive_value("get_recipient_address") or self._get_missive_value(
+            "recipient_address"
+        )
         if not recipient_address:
             self._update_status(MissiveStatus.FAILED, error_message="No postal address")
             return False
+        return True
 
-        raise NotImplementedError(
-            f"{self.name} must implement the send_postal() method"
-        )
+    def send_postal(self, **kwargs) -> bool:
+        """Default implementation delegating to `_send_postal_service`."""
+        if not self._require_postal_address():
+            return False
+        return self._send_postal_service(service="postal", **kwargs)
 
     def send_postal_registered(self, **kwargs) -> bool:
-        """Registered mail defaults to postal handler."""
-        return self.send_postal(**kwargs)
+        """Registered mail defaults to postal handler with specific flags."""
+        if not self._require_postal_address():
+            return False
+        return self._send_postal_service(
+            service="postal_registered", is_registered=True, **kwargs
+        )
 
     def send_postal_signature(self, **kwargs) -> bool:
         """Signature-required mail defaults to registered handler."""
-        return self.send_postal_registered(**kwargs)
+        if not self._require_postal_address():
+            return False
+        return self._send_postal_service(
+            service="postal_signature",
+            is_registered=True,
+            requires_signature=True,
+            **kwargs,
+        )
 
     def send_lre(self, **kwargs) -> bool:
         """LRE sending placeholder."""
@@ -334,6 +359,35 @@ class BasePostalMixin:
         price = self._get_postal_service_value("ere", "price") or 0.0
         return {"cost": price, "format": "ere"}
 
+    def _build_service_status_payload(
+        self,
+        *,
+        rate_limits: Dict[str, Any],
+        warnings: Optional[List[str]] = None,
+        details: Optional[Dict[str, Any]] = None,
+        sla: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Default service status helper shared by postal providers."""
+        clock = getattr(self, "_clock", None)
+        last_check = clock() if callable(clock) else datetime.now(timezone.utc)
+        return {
+            "status": "unknown",
+            "is_available": None,
+            "services": self._get_services(),
+            "credits": {
+                "type": "money",
+                "remaining": None,
+                "currency": "EUR",
+                "limit": None,
+                "percentage": None,
+            },
+            "rate_limits": rate_limits,
+            "sla": sla or {"uptime_percentage": 99.0},
+            "last_check": last_check,
+            "warnings": warnings or [],
+            "details": details or {},
+        }
+
     def _prepare_attachments_for_service(
         self, attachments: List[Any], service: str
     ) -> List[Dict[str, Any]]:
@@ -427,28 +481,6 @@ class BasePostalMixin:
         """Prepare attachments for ERE delivery."""
         return self._prepare_attachments_for_service(attachments, "ere")
 
-    def _check_attachment_mime_type(
-        self, attachment: Any, idx: int
-    ) -> tuple[List[str], List[str]]:
-        """Check MIME type for a single attachment."""
-        errors: List[str] = []
-        warnings: List[str] = []
-
-        mime_type = getattr(attachment, "mime_type", None)
-        if mime_type:
-            if (
-                self.allowed_attachment_mime_types
-                and mime_type not in self.allowed_attachment_mime_types
-            ):
-                errors.append(
-                    f"Attachment {idx + 1}: MIME type '{mime_type}' not allowed. "
-                    f"Allowed types: {', '.join(self.allowed_attachment_mime_types)}"
-                )
-        else:
-            warnings.append(f"Attachment {idx + 1}: MIME type not specified")
-
-        return errors, warnings
-
     def _check_attachment_page_count(
         self, attachment: Any, idx: int
     ) -> tuple[Optional[int], List[str], List[str]]:
@@ -479,14 +511,16 @@ class BasePostalMixin:
         warnings: List[str] = []
 
         page_format = getattr(attachment, "page_format", None)
-        if page_format:
-            if self.allowed_page_formats and page_format.upper() not in [
-                fmt.upper() for fmt in self.allowed_page_formats
-            ]:
-                errors.append(
-                    f"Attachment {idx + 1}: Page format '{page_format}' not allowed. "
-                    f"Allowed formats: {', '.join(self.allowed_page_formats)}"
-                )
+        if (
+            page_format
+            and self.allowed_page_formats
+            and page_format.upper()
+            not in [fmt.upper() for fmt in self.allowed_page_formats]
+        ):
+            errors.append(
+                f"Attachment {idx + 1}: Page format '{page_format}' not allowed. "
+                f"Allowed formats: {', '.join(self.allowed_page_formats)}"
+            )
 
         return errors, warnings
 

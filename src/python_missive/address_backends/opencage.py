@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import time
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 
 from .base import BaseAddressBackend
 
@@ -39,65 +38,19 @@ class OpenCageAddressBackend(BaseAddressBackend):
         )
         self._last_request_time = 0.0
 
-    def _build_address_string(
-        self,
-        address_line1: Optional[str] = None,
-        address_line2: Optional[str] = None,
-        address_line3: Optional[str] = None,
-        city: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-    ) -> str:
-        """Build a query string from address components."""
-        parts = []
-        if address_line1:
-            parts.append(address_line1)
-        if address_line2:
-            parts.append(address_line2)
-        if city:
-            parts.append(city)
-        if postal_code:
-            parts.append(postal_code)
-        if state:
-            parts.append(state)
-        if country:
-            parts.append(country)
-        return ", ".join(filter(None, parts))
-
-    def _rate_limit(self) -> None:
-        """Respect rate limit (2 requests per second)."""
-        current_time = time.time()
-        time_since_last = current_time - self._last_request_time
-        if time_since_last < 0.5:
-            time.sleep(0.5 - time_since_last)
-        self._last_request_time = time.time()
-
     def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Make a request to the OpenCage API."""
-        try:
-            import requests
-        except ImportError:
-            return {"error": "requests package not installed"}
+        self._rate_limit_with_interval("_last_request_time", 0.5)
 
-        self._rate_limit()
-
-        url = f"{self._base_url}{endpoint}"
-
-        request_params: Dict[str, Any] = {
-            "key": self._api_key,
-        }
-        if params:
-            request_params.update(params)
-
-        try:
-            response = requests.get(url, params=request_params, timeout=10)
-            response.raise_for_status()
-            return cast(Dict[str, Any], response.json())
-        except requests.exceptions.RequestException as e:
-            return {"error": str(e)}
+        default_params: Dict[str, Any] = {"key": self._api_key}
+        return self._request_json(
+            self._base_url,
+            endpoint,
+            params,
+            default_params=default_params,
+        )
 
     def _extract_address_from_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Extract address components from an OpenCage result."""
@@ -162,28 +115,13 @@ class OpenCageAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using OpenCage."""
-        if query:
-            query_string = query
-        else:
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not query_string:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Address query is empty"],
-            }
+        query_string, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_validation_failure(error=msg),
+        )
+        if failure:
+            return failure
 
         params: Dict[str, Any] = {"q": query_string, "limit": 5, "no_annotations": 0}
         if country:
@@ -194,81 +132,43 @@ class OpenCageAddressBackend(BaseAddressBackend):
         result = self._make_request("/json", params)
 
         if "error" in result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [result["error"]],
-            }
+            return self._build_validation_failure(error=result["error"])
 
         results = result.get("results", [])
-        if not results:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
 
-        best_match = results[0]
-        normalized = self._extract_address_from_result(best_match)
+        def _extract_feature(feature: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_result(feature)
+            geometry = feature.get("geometry", {})
+            lat = geometry.get("lat")
+            lon = geometry.get("lng")
+            if lat is not None:
+                payload["latitude"] = float(lat)
+            if lon is not None:
+                payload["longitude"] = float(lon)
+            confidence_raw = feature.get("confidence", 0)
+            payload["confidence"] = float(min(confidence_raw / 10.0, 1.0))
+            annotations = feature.get("annotations", {})
+            geohash = annotations.get("geohash")
+            if geohash:
+                payload["address_reference"] = str(geohash)
+            return payload
 
-        # Extract coordinates from geometry
-        geometry = best_match.get("geometry", {})
-        lat = geometry.get("lat")
-        lon = geometry.get("lng")
-        if lat is not None and lon is not None:
-            normalized["latitude"] = float(lat)
-            normalized["longitude"] = float(lon)
-
-        # OpenCage provides confidence (0-10, we normalize to 0-1)
-        confidence_raw = best_match.get("confidence", 0)
-        confidence = min(confidence_raw / 10.0, 1.0)
-        normalized["confidence"] = confidence
-
-        is_valid = confidence >= 0.5
-
-        suggestions = []
-        if not is_valid and len(results) > 1:
-            for result_item in results[1:5]:
-                suggestion_normalized = self._extract_address_from_result(result_item)
-                suggestion_geometry = result_item.get("geometry", {})
-                suggestion_lat = suggestion_geometry.get("lat")
-                suggestion_lon = suggestion_geometry.get("lng")
-                suggestion_confidence_raw = result_item.get("confidence", 0)
-
-                suggestion_data = {
-                    "formatted_address": result_item.get("formatted", ""),
-                    "confidence": min(suggestion_confidence_raw / 10.0, 1.0),
-                }
-                if suggestion_lat is not None and suggestion_lon is not None:
-                    suggestion_data["latitude"] = float(suggestion_lat)
-                    suggestion_data["longitude"] = float(suggestion_lon)
-                suggestion_data.update(suggestion_normalized)
-                suggestions.append(suggestion_data)
-
-        warnings = []
-        if confidence < 0.7:
-            warnings.append("Low confidence match")
-
-        # Use geohash as reference (or formatted address hash)
-        address_reference = best_match.get("annotations", {}).get("geohash", "")
-
-        return {
-            "is_valid": is_valid,
-            "normalized_address": normalized,
-            "confidence": confidence,
-            "suggestions": suggestions,
-            "warnings": warnings,
-            "errors": [],
-            "address_reference": (
-                str(address_reference) if address_reference else normalized.get("address_reference")
-            ),
-        }
+        return self._feature_validation_payload(
+            features=results,
+            extractor=_extract_feature,
+            formatted_getter=lambda feature: feature.get("formatted", ""),
+            confidence_getter=lambda feature, normalized: normalized.get("confidence", 0.0),
+            suggestion_formatter=lambda feature, normalized_suggestion: {
+                "formatted_address": feature.get("formatted", ""),
+                "confidence": normalized_suggestion.get("confidence", 0.0),
+                "latitude": normalized_suggestion.get("latitude"),
+                "longitude": normalized_suggestion.get("longitude"),
+            },
+            valid_threshold=0.5,
+            warning_threshold=0.7,
+            missing_error="No address found",
+            max_suggestions=4,
+        )
 
     def geocode(
         self,
@@ -283,93 +183,68 @@ class OpenCageAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using OpenCage."""
-        if query:
-            query_string = query
-        else:
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
+
+        def _request(query_string: str) -> Dict[str, Any]:
+            params: Dict[str, Any] = {"q": query_string, "limit": 1, "no_annotations": 0}
+            if country:
+                params["countrycode"] = country.lower()
+            if "language" in kwargs:
+                params["language"] = kwargs["language"]
+            return self._make_request("/json", params)
+
+        accuracy_map = {
+            "house_number": "ROOFTOP",
+            "road": "STREET",
+            "city": "CITY",
+            "town": "CITY",
+        }
+
+        def _handle(result: Dict[str, Any], _query: str) -> Dict[str, Any]:
+            results = result.get("results", [])
+
+            def _extract_feature(feature: Dict[str, Any]) -> Dict[str, Any]:
+                payload = self._extract_address_from_result(feature)
+                geometry = feature.get("geometry", {})
+                lat = geometry.get("lat")
+                lon = geometry.get("lng")
+                if lat is not None:
+                    payload["latitude"] = float(lat)
+                if lon is not None:
+                    payload["longitude"] = float(lon)
+                confidence_raw = feature.get("confidence", 0)
+                payload["confidence"] = float(min(confidence_raw / 10.0, 1.0))
+                annotations = feature.get("annotations", {})
+                geohash = annotations.get("geohash")
+                if geohash:
+                    payload["address_reference"] = str(geohash)
+                payload["formatted_address"] = feature.get("formatted", "")
+                return payload
+
+            def _accuracy_from_feature(
+                feature: Dict[str, Any], _normalized: Dict[str, Any]
+            ) -> str:
+                components = feature.get("components", {})
+                for key in ("house_number", "road", "city", "town"):
+                    if components.get(key):
+                        return accuracy_map[key]
+                return "APPROXIMATE"
+
+            return self._feature_geocode_payload(
+                features=results,
+                extractor=_extract_feature,
+                formatted_getter=lambda feature: feature.get("formatted", ""),
+                accuracy_getter=_accuracy_from_feature,
+                confidence_getter=lambda feature, normalized: normalized.get("confidence", 0.0),
+                missing_error="No address found",
             )
 
-        if not query_string:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["Address query is empty"],
-            }
-
-        params: Dict[str, Any] = {"q": query_string, "limit": 1, "no_annotations": 0}
-        if country:
-            params["countrycode"] = country.lower()
-        if "language" in kwargs:
-            params["language"] = kwargs["language"]
-
-        result = self._make_request("/json", params)
-
-        if "error" in result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
-
-        results = result.get("results", [])
-        if not results:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
-
-        feature = results[0]
-        normalized = self._extract_address_from_result(feature)
-
-        geometry = feature.get("geometry", {})
-        lat = geometry.get("lat")
-        lon = geometry.get("lng")
-        latitude = float(lat) if lat is not None else None
-        longitude = float(lon) if lon is not None else None
-
-        # Determine accuracy from components
-        components = feature.get("components", {})
-        accuracy = "APPROXIMATE"
-        if components.get("house_number"):
-            accuracy = "ROOFTOP"
-        elif components.get("road"):
-            accuracy = "STREET"
-        elif components.get("city") or components.get("town"):
-            accuracy = "CITY"
-
-        # OpenCage provides confidence (0-10, normalize to 0-1)
-        confidence_raw = feature.get("confidence", 0)
-        confidence = min(confidence_raw / 10.0, 1.0)
-
-        address_reference = feature.get("annotations", {}).get("geohash", "")
-
-        return {
-            **normalized,
-            "latitude": latitude,
-            "longitude": longitude,
-            "accuracy": accuracy,
-            "confidence": confidence,
-            "formatted_address": feature.get("formatted", ""),
-            "address_reference": str(address_reference) if address_reference else None,
-            "errors": [],
-        }
+        return self._execute_geocode_flow(
+            query=query,
+            context=locals(),
+            failure_builder=self._build_geocode_failure,
+            request_callable=_request,
+            result_handler=_handle,
+        )
 
     def reverse_geocode(self, latitude: float, longitude: float, **kwargs: Any) -> Dict[str, Any]:
         """Reverse geocode coordinates to an address using OpenCage."""
@@ -383,35 +258,11 @@ class OpenCageAddressBackend(BaseAddressBackend):
         result = self._make_request("/json", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "latitude": None,
-                "longitude": None,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
+            return self._build_empty_address_payload(error=result["error"])
 
         results = result.get("results", [])
         if not results:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "latitude": None,
-                "longitude": None,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
+            return self._build_empty_address_payload(error="No address found")
 
         best_match = results[0]
         normalized = self._extract_address_from_result(best_match)
@@ -433,19 +284,9 @@ class OpenCageAddressBackend(BaseAddressBackend):
         """
         # OpenCage doesn't support direct lookup by geohash
         # We would need to decode geohash to coordinates and use reverse_geocode
-        return {
-            "address_line1": None,
-            "address_line2": None,
-            "address_line3": None,
-            "city": None,
-            "postal_code": None,
-            "state": None,
-            "country": None,
-            "latitude": None,
-            "longitude": None,
-            "formatted_address": None,
-            "errors": [
+        return self._build_empty_address_payload(
+            error=(
                 "OpenCage does not support direct lookup by reference ID. "
                 "Use reverse_geocode with coordinates instead."
-            ],
-        }
+            )
+        )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..status import MissiveStatus
 from .base import BaseProvider
@@ -252,59 +252,55 @@ class BrevoProvider(BaseProvider):
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Assess whether an email can be sent safely via Brevo."""
-        target_missive = missive if missive is not None else self.missive
-        if not target_missive:
+
+        def _handler(
+            _target: Any,
+            factors: Dict[str, Any],
+            recommendations: List[str],
+            total_risk: float,
+        ) -> Dict[str, Any]:
+            risk_total = total_risk
+            if "BREVO_API_KEY" not in self._config:
+                recommendations.append("Missing BREVO_API_KEY in configuration")
+                risk_total = 100.0
+
+            recipient_email = self._get_missive_value("recipient_email")
+            if not recipient_email:
+                recommendations.append("Recipient email missing")
+                risk_total = 100.0
+            else:
+                email_validation = self.validate_email(recipient_email)
+                factors["email_validation"] = email_validation
+                risk_total += email_validation.get("risk_score", 0) * 0.5
+                recommendations.extend(email_validation.get("warnings", []))
+
+            sender_email = self._get_sender_email()
+            if not sender_email:
+                recommendations.append("BREVO_DEFAULT_FROM_EMAIL missing")
+                risk_total = max(risk_total, 80)
+
+            service_status = self.get_service_status()
+            factors["service_status"] = service_status
+            if service_status.get("is_available") is False:
+                risk_total += 40
+                recommendations.append("Brevo email service currently unavailable")
+
+            risk_score = min(int(risk_total), 100)
+            risk_level = self._calculate_risk_level(risk_score)
+
+            should_send = (
+                risk_score < 70 and "Recipient email missing" not in recommendations
+            )
+
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
-                "should_send": False,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations,
+                "should_send": should_send,
             }
 
-        factors: Dict[str, Any] = {}
-        recommendations: list[str] = []
-        total_risk = 0.0
-
-        if "BREVO_API_KEY" not in self._config:
-            recommendations.append("Missing BREVO_API_KEY in configuration")
-            total_risk = 100
-
-        recipient_email = self._get_missive_value("recipient_email")
-        if not recipient_email:
-            recommendations.append("Recipient email missing")
-            total_risk = 100
-        else:
-            email_validation = self.validate_email(recipient_email)
-            factors["email_validation"] = email_validation
-            total_risk += email_validation.get("risk_score", 0) * 0.5
-            recommendations.extend(email_validation.get("warnings", []))
-
-        sender_email = self._get_sender_email()
-        if not sender_email:
-            recommendations.append("BREVO_DEFAULT_FROM_EMAIL missing")
-            total_risk = max(total_risk, 80)
-
-        service_status = self.get_service_status()
-        factors["service_status"] = service_status
-        if service_status.get("is_available") is False:
-            total_risk += 40
-            recommendations.append("Brevo email service currently unavailable")
-
-        risk_score = min(int(total_risk), 100)
-        risk_level = self._calculate_risk_level(risk_score)
-
-        should_send = (
-            risk_score < 70 and "Recipient email missing" not in recommendations
-        )
-
-        return {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations,
-            "should_send": should_send,
-        }
+        return self._run_risk_analysis(missive, _handler)
 
     def calculate_email_marketing_delivery_risk(
         self, missive: Optional[Any] = None

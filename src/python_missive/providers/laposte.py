@@ -7,6 +7,10 @@ from typing import Any, Dict, Optional, Tuple
 
 from ..status import MissiveStatus
 from .base import BaseProvider
+from .base.postal_defaults import (
+    POSTAL_DEFAULT_MIME_TYPES,
+    POSTAL_ENVELOPE_LIMITS,
+)
 
 
 class LaPosteProvider(BaseProvider):
@@ -28,37 +32,15 @@ class LaPosteProvider(BaseProvider):
         "LRE",
     ]
 
-    _POSTAL_MIME_TYPES = [
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/rtf",
-        "text/plain",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ]
-    _POSTAL_ENVELOPE_LIMITS = [
-        {
-            "format": "C4 double-window",
-            "dimensions_mm": "210x300",
-            "max_sheets": 45,
-        },
-        {
-            "format": "DL simple/double-window",
-            "dimensions_mm": "114x229",
-            "max_sheets": 5,
-        },
-    ]
-
     # Postal (courrier simple)
     postal_price = 1.722  # 1.435€ +20%
     postal_page_price_black_white = 0.396
     postal_page_price_color = 0.696
     postal_page_price_single_sided = 0.396
     postal_page_price_duplex = 0.408
-    postal_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_allowed_attachment_mime_types = list(POSTAL_DEFAULT_MIME_TYPES)
     postal_allowed_page_formats = ["A4"]
-    postal_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_envelope_limits = [limit.copy() for limit in POSTAL_ENVELOPE_LIMITS]
     postal_page_limit = 45
     postal_color_printing_available = True
     postal_duplex_printing_available = True
@@ -70,9 +52,9 @@ class LaPosteProvider(BaseProvider):
     postal_registered_page_price_color = 0.696
     postal_registered_page_price_single_sided = 0.396
     postal_registered_page_price_duplex = 0.408
-    postal_registered_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_registered_allowed_attachment_mime_types = list(POSTAL_DEFAULT_MIME_TYPES)
     postal_registered_allowed_page_formats = ["A4"]
-    postal_registered_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_registered_envelope_limits = [limit.copy() for limit in POSTAL_ENVELOPE_LIMITS]
     postal_registered_page_limit = 45
     postal_registered_color_printing_available = True
     postal_registered_duplex_printing_available = True
@@ -84,9 +66,9 @@ class LaPosteProvider(BaseProvider):
     postal_signature_page_price_color = 0.696
     postal_signature_page_price_single_sided = 0.396
     postal_signature_page_price_duplex = 0.408
-    postal_signature_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_signature_allowed_attachment_mime_types = list(POSTAL_DEFAULT_MIME_TYPES)
     postal_signature_allowed_page_formats = ["A4"]
-    postal_signature_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_signature_envelope_limits = [limit.copy() for limit in POSTAL_ENVELOPE_LIMITS]
     postal_signature_page_limit = 45
     postal_signature_color_printing_available = True
     postal_signature_duplex_printing_available = True
@@ -178,25 +160,6 @@ class LaPosteProvider(BaseProvider):
             self._update_status(MissiveStatus.FAILED, error_message=str(e))
             self._create_event("failed", str(e))
             return False
-
-    def send_postal(self, **kwargs) -> bool:
-        """Send postal mail via La Poste API"""
-        return self._send_postal_service(service="postal", **kwargs)
-
-    def send_postal_registered(self, **kwargs) -> bool:
-        """Send registered postal mail via La Poste."""
-        return self._send_postal_service(
-            service="postal_registered", is_registered=True, **kwargs
-        )
-
-    def send_postal_signature(self, **kwargs) -> bool:
-        """Send registered mail with signature via La Poste."""
-        return self._send_postal_service(
-            service="postal_signature",
-            is_registered=True,
-            requires_signature=True,
-            **kwargs,
-        )
 
     def send_lre(self, **kwargs) -> bool:
         """Send LRE via La Poste (placeholder)."""
@@ -415,34 +378,15 @@ class LaPosteProvider(BaseProvider):
         Returns:
             Dict with status, credits, etc.
         """
-        clock = getattr(self, "_clock", None)
-        last_check = clock() if callable(clock) else datetime.now(timezone.utc)
-
-        return {
-            "status": "unknown",
-            "is_available": None,
-            "services": self._get_services(),
-            "credits": {
-                "type": "money",
-                "remaining": None,
-                "currency": "EUR",
-                "limit": None,
-                "percentage": None,
-            },
-            "rate_limits": {
-                "per_second": 2,
-                "per_minute": 120,
-            },
-            "sla": {
-                "uptime_percentage": 99.9,
-            },
-            "last_check": last_check,
-            "warnings": ["La Poste API not implemented - uncomment the code"],
-            "details": {
+        return self._build_service_status_payload(
+            rate_limits={"per_second": 2, "per_minute": 120},
+            warnings=["La Poste API not implemented - uncomment the code"],
+            details={
                 "refill_url": "https://developer.laposte.fr/",
                 "api_docs": "https://developer.laposte.fr/products",
             },
-        }
+            sla={"uptime_percentage": 99.9},
+        )
 
 
 __all__ = ["LaPosteProvider"]

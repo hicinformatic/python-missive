@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 
 from .base import BaseAddressBackend
 
@@ -29,32 +29,6 @@ class MapboxAddressBackend(BaseAddressBackend):
         super().__init__(config)
         self._access_token = self._config.get("MAPBOX_ACCESS_TOKEN")
 
-    def _build_address_string(
-        self,
-        address_line1: Optional[str] = None,
-        address_line2: Optional[str] = None,
-        address_line3: Optional[str] = None,
-        city: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-    ) -> str:
-        """Build a query string from address components."""
-        parts = []
-        if address_line1:
-            parts.append(address_line1)
-        if address_line2:
-            parts.append(address_line2)
-        if city:
-            parts.append(city)
-        if postal_code:
-            parts.append(postal_code)
-        if state:
-            parts.append(state)
-        if country:
-            parts.append(country)
-        return ", ".join(filter(None, parts))
-
     def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -62,31 +36,13 @@ class MapboxAddressBackend(BaseAddressBackend):
         if not self._access_token:
             return {"error": "MAPBOX_ACCESS_TOKEN not configured"}
 
-        try:
-            import requests
-        except ImportError:
-            return {"error": "requests package not installed"}
-
-        base_url = "https://api.mapbox.com"
-        url = f"{base_url}{endpoint}"
-
-        request_params: Dict[str, Any] = {"access_token": self._access_token}
-        if params:
-            request_params.update(params)
-
-        try:
-            response = requests.get(url, params=request_params, timeout=10)
-            response.raise_for_status()
-            return cast(Dict[str, Any], response.json())
-        except requests.exceptions.HTTPError as e:
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("message", str(e))
-            except Exception:
-                error_msg = str(e)
-            return {"error": error_msg}
-        except requests.exceptions.RequestException as e:
-            return {"error": str(e)}
+        default_params = {"access_token": self._access_token}
+        return self._request_json(
+            "https://api.mapbox.com",
+            endpoint,
+            params,
+            default_params=default_params,
+        )
 
     def validate_address(
         self,
@@ -101,33 +57,18 @@ class MapboxAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using Mapbox Geocoding API."""
-        # Si query est fourni, l'utiliser directement (priorité sur les composants)
-        if query:
-            query_string = query
-        else:
-            # Fallback sur les composants structurés si query n'est pas fourni
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not query_string:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Address query is empty"],
-            }
+        query_string, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_validation_failure(error=msg),
+        )
+        if failure:
+            return failure
 
         import urllib.parse
 
+        # After checking failure is None, query_string is guaranteed to be str
+        assert query_string is not None
         encoded_query = urllib.parse.quote(query_string)
         params: Dict[str, Any] = {"limit": 5}
         if country:
@@ -136,73 +77,36 @@ class MapboxAddressBackend(BaseAddressBackend):
         result = self._make_request(f"/geocoding/v5/mapbox.places/{encoded_query}.json", params)
 
         if "error" in result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [result["error"]],
-            }
+            return self._build_validation_failure(error=result["error"])
 
         features = result.get("features", [])
-        if not features:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
 
-        best_match = features[0]
-        normalized = self._extract_address_from_feature(best_match)
+        def _extract_with_coordinates(feature: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_feature(feature)
+            coords = feature.get("geometry", {}).get("coordinates", [])
+            if len(coords) >= 2:
+                payload["longitude"] = float(coords[0])
+                payload["latitude"] = float(coords[1])
+            return payload
 
-        # Extract coordinates from geometry (GeoJSON format: [longitude, latitude])
-        coordinates = best_match.get("geometry", {}).get("coordinates", [])
-        if len(coordinates) >= 2:
-            normalized["longitude"] = float(coordinates[0])
-            normalized["latitude"] = float(coordinates[1])
-
-        confidence = best_match.get("relevance", 0.0)
-
-        # Add confidence to normalized_address
-        normalized["confidence"] = confidence
-
-        is_valid = confidence >= 0.7
-
-        suggestions = []
-        if not is_valid and len(features) > 1:
-            for feature in features[1:]:
-                suggestion_data = {
-                    "formatted_address": feature.get("place_name", ""),
-                    "confidence": feature.get("relevance", 0.0),
-                }
-                # Add coordinates to suggestions
-                feat_coords = feature.get("geometry", {}).get("coordinates", [])
-                if len(feat_coords) >= 2:
-                    suggestion_data["longitude"] = float(feat_coords[0])
-                    suggestion_data["latitude"] = float(feat_coords[1])
-                suggestions.append(suggestion_data)
-
-        warnings = []
-        if confidence < 0.9:
-            warnings.append("Low confidence match")
-
-        feature_id = best_match.get("id")
-
-        return {
-            "is_valid": is_valid,
-            "normalized_address": normalized,
-            "confidence": confidence,
-            "suggestions": suggestions,
-            "warnings": warnings,
-            "errors": [],
-            "address_reference": (
-                str(feature_id) if feature_id is not None else normalized.get("address_reference")
+        return self._feature_validation_payload(
+            features=features,
+            extractor=_extract_with_coordinates,
+            formatted_getter=lambda feature: feature.get("place_name", ""),
+            confidence_getter=lambda feature, _normalized: float(
+                feature.get("relevance", 0.0)
             ),
-        }
+            suggestion_formatter=lambda feature, normalized_suggestion: {
+                "formatted_address": feature.get("place_name", ""),
+                "confidence": float(feature.get("relevance", 0.0)),
+                "latitude": normalized_suggestion.get("latitude"),
+                "longitude": normalized_suggestion.get("longitude"),
+            },
+            valid_threshold=0.7,
+            warning_threshold=0.9,
+            missing_error="No address found",
+            max_suggestions=4,
+        )
 
     def geocode(
         self,
@@ -217,33 +121,18 @@ class MapboxAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using Mapbox."""
-        # Si query est fourni, l'utiliser directement (priorité sur les composants)
-        if query:
-            query_string = query
-        else:
-            # Fallback sur les composants structurés si query n'est pas fourni
-            query_string = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not query_string:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["Address query is empty"],
-            }
+        query_string, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_geocode_failure(msg),
+        )
+        if failure:
+            return failure
 
         import urllib.parse
 
+        # After checking failure is None, query_string is guaranteed to be str
+        assert query_string is not None
         encoded_query = urllib.parse.quote(query_string)
         params: Dict[str, Any] = {"limit": 1}
         if country:
@@ -252,31 +141,9 @@ class MapboxAddressBackend(BaseAddressBackend):
         result = self._make_request(f"/geocoding/v5/mapbox.places/{encoded_query}.json", params)
 
         if "error" in result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
+            return self._build_geocode_failure(error=result["error"])
 
         features = result.get("features", [])
-        if not features:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
-
-        feature = features[0]
-        normalized = self._extract_address_from_feature(feature)
-        coordinates = feature.get("geometry", {}).get("coordinates", [])
-        properties = feature.get("properties", {})
-
         accuracy_map = {
             "address": "ROOFTOP",
             "poi": "ROOFTOP",
@@ -287,26 +154,27 @@ class MapboxAddressBackend(BaseAddressBackend):
             "region": "REGION",
             "country": "COUNTRY",
         }
-        accuracy = accuracy_map.get(properties.get("type", ""), "UNKNOWN")
-        feature_id = feature.get("id")
-        confidence = feature.get("relevance", 0.0)
 
-        # Add coordinates and confidence to normalized
-        if len(coordinates) >= 2:
-            normalized["latitude"] = float(coordinates[1])
-            normalized["longitude"] = float(coordinates[0])
-        normalized["confidence"] = confidence
+        def _extract_with_coordinates(feature: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_feature(feature)
+            coords = feature.get("geometry", {}).get("coordinates", [])
+            if len(coords) >= 2:
+                payload["latitude"] = float(coords[1])
+                payload["longitude"] = float(coords[0])
+            return payload
 
-        return {
-            **normalized,
-            "latitude": normalized.get("latitude"),
-            "longitude": normalized.get("longitude"),
-            "accuracy": accuracy,
-            "confidence": confidence,
-            "formatted_address": feature.get("place_name", ""),
-            "address_reference": str(feature_id) if feature_id is not None else None,
-            "errors": [],
-        }
+        return self._feature_geocode_payload(
+            features=features,
+            extractor=_extract_with_coordinates,
+            formatted_getter=lambda feature: feature.get("place_name", ""),
+            accuracy_getter=lambda feature, _normalized: accuracy_map.get(
+                feature.get("properties", {}).get("type", ""), "UNKNOWN"
+            ),
+            confidence_getter=lambda feature, _normalized: float(
+                feature.get("relevance", 0.0)
+            ),
+            missing_error="No address found",
+        )
 
     def reverse_geocode(self, latitude: float, longitude: float, **kwargs: Any) -> Dict[str, Any]:
         """Reverse geocode coordinates to an address using Mapbox."""
@@ -319,33 +187,11 @@ class MapboxAddressBackend(BaseAddressBackend):
         )
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": [result["error"]],
-            }
+            return self._build_empty_address_payload(error=result["error"])
 
         features = result.get("features", [])
         if not features:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": ["No address found"],
-            }
+            return self._build_empty_address_payload(error="No address found")
 
         feature = features[0]
         normalized = self._extract_address_from_feature(feature)
@@ -364,21 +210,10 @@ class MapboxAddressBackend(BaseAddressBackend):
     def get_address_by_reference(self, address_reference: str, **kwargs: Any) -> Dict[str, Any]:
         """Retrieve an address by its feature ID using Mapbox Geocoding API."""
         if not address_reference:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["address_reference is required"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="address_reference is required",
+            )
 
         import urllib.parse
 
@@ -390,39 +225,16 @@ class MapboxAddressBackend(BaseAddressBackend):
         result = self._make_request(f"/geocoding/v5/mapbox.places/{encoded_id}.json", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": [result["error"]],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference, error=result["error"]
+            )
 
         features = result.get("features", [])
         if not features:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["No address found for this feature ID"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="No address found for this feature ID",
+            )
 
         feature = features[0]
         normalized = self._extract_address_from_feature(feature)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 
 from .base import BaseAddressBackend
 
@@ -30,32 +30,6 @@ class HereAddressBackend(BaseAddressBackend):
         self._app_id = self._config.get("HERE_APP_ID")
         self._app_code = self._config.get("HERE_APP_CODE")
 
-    def _build_address_string(
-        self,
-        address_line1: Optional[str] = None,
-        address_line2: Optional[str] = None,
-        address_line3: Optional[str] = None,
-        city: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-    ) -> str:
-        """Build a query string from address components."""
-        parts = []
-        if address_line1:
-            parts.append(address_line1)
-        if address_line2:
-            parts.append(address_line2)
-        if city:
-            parts.append(city)
-        if postal_code:
-            parts.append(postal_code)
-        if state:
-            parts.append(state)
-        if country:
-            parts.append(country)
-        return ", ".join(filter(None, parts))
-
     def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -63,34 +37,17 @@ class HereAddressBackend(BaseAddressBackend):
         if not self._app_id or not self._app_code:
             return {"error": "HERE_APP_ID and HERE_APP_CODE must be configured"}
 
-        try:
-            import requests
-        except ImportError:
-            return {"error": "requests package not installed"}
-
-        base_url = "https://geocoder.api.here.com/6.2"
-        url = f"{base_url}{endpoint}"
-
-        request_params: Dict[str, Any] = {
+        default_params: Dict[str, Any] = {
             "app_id": self._app_id,
             "app_code": self._app_code,
         }
-        if params:
-            request_params.update(params)
 
-        try:
-            response = requests.get(url, params=request_params, timeout=10)
-            response.raise_for_status()
-            return cast(Dict[str, Any], response.json())
-        except requests.exceptions.HTTPError as e:
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("error", {}).get("message", str(e))
-            except Exception:
-                error_msg = str(e)
-            return {"error": error_msg}
-        except requests.exceptions.RequestException as e:
-            return {"error": str(e)}
+        return self._request_json(
+            "https://geocoder.api.here.com/6.2",
+            endpoint,
+            params,
+            default_params=default_params,
+        )
 
     def validate_address(
         self,
@@ -105,30 +62,13 @@ class HereAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using HERE Geocoding API."""
-        # Si query est fourni, l'utiliser directement (priorité sur les composants)
-        if query:
-            search_text = query
-        else:
-            # Fallback sur les composants structurés si query n'est pas fourni
-            search_text = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not search_text:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Address query is empty"],
-            }
+        search_text, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_validation_failure(error=msg),
+        )
+        if failure:
+            return failure
 
         params = {"searchtext": search_text, "maxresults": 5}
         if country:
@@ -137,85 +77,59 @@ class HereAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode.json", params)
 
         if "error" in result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [result["error"]],
-            }
+            return self._build_validation_failure(error=result["error"])
 
         response = result.get("Response", {})
         view = response.get("View", [])
-        if not view:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
+        results = view[0].get("Result", []) if view else []
 
-        results = view[0].get("Result", [])
-        if not results:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
+        def _extract_feature(result_item: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_result(result_item)
+            display_position = (
+                result_item.get("Location", {}).get("DisplayPosition", {}) or {}
+            )
+            lat = display_position.get("Latitude")
+            lon = display_position.get("Longitude")
+            if lat is not None and lon is not None:
+                payload["latitude"] = float(lat)
+                payload["longitude"] = float(lon)
+            return payload
 
-        best_match = results[0]
-        normalized = self._extract_address_from_result(best_match)
-
-        match_quality = best_match.get("MatchQuality", {})
-        relevance = match_quality.get("Relevance", 0.0) / 100.0
-        confidence = relevance
-
-        match_level = match_quality.get("MatchLevel", "")
-        is_valid = (
-            match_level in ("houseNumber", "street", "intersection")
-            and confidence >= 0.7
+        payload = self._feature_validation_payload(
+            features=results,
+            extractor=_extract_feature,
+            formatted_getter=lambda item: item.get("Location", {})
+            .get("Address", {})
+            .get("Label", ""),
+            confidence_getter=lambda item, _normalized: float(
+                (item.get("MatchQuality", {}).get("Relevance", 0.0) or 0.0) / 100.0
+            ),
+            suggestion_formatter=lambda item, normalized_suggestion: {
+                "formatted_address": item.get("Location", {})
+                .get("Address", {})
+                .get("Label", ""),
+                "confidence": float(
+                    (item.get("MatchQuality", {}).get("Relevance", 0.0) or 0.0) / 100.0
+                ),
+                "latitude": normalized_suggestion.get("latitude"),
+                "longitude": normalized_suggestion.get("longitude"),
+            },
+            valid_threshold=0.7,
+            warning_threshold=0.9,
+            missing_error="No address found",
+            max_suggestions=4,
         )
 
-        suggestions = []
-        if not is_valid and len(results) > 1:
-            for result_item in results[1:5]:
-                item_match_quality = result_item.get("MatchQuality", {})
-                item_relevance = item_match_quality.get("Relevance", 0.0) / 100.0
-                location = result_item.get("Location", {})
-                address = location.get("Address", {})
-                suggestions.append(
-                    {
-                        "formatted_address": address.get("Label", ""),
-                        "confidence": item_relevance,
-                    }
+        if results:
+            match_level = (
+                results[0].get("MatchQuality", {}).get("MatchLevel", "") or ""
+            )
+            if match_level not in ("houseNumber", "street"):
+                payload["warnings"].append(
+                    f"Match level is {match_level}, not exact address"
                 )
 
-        warnings = []
-        if match_level not in ("houseNumber", "street"):
-            warnings.append(f"Match level is {match_level}, not exact address")
-        if confidence < 0.9:
-            warnings.append("Low confidence match")
-
-        location = best_match.get("Location", {})
-        location_id = location.get("LocationId")
-
-        return {
-            "is_valid": is_valid,
-            "normalized_address": normalized,
-            "confidence": confidence,
-            "suggestions": suggestions,
-            "warnings": warnings,
-            "errors": [],
-            "address_reference": (
-                str(location_id) if location_id else normalized.get("address_reference")
-            ),
-        }
+        return payload
 
     def geocode(
         self,
@@ -230,30 +144,13 @@ class HereAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using HERE."""
-        # Si query est fourni, l'utiliser directement (priorité sur les composants)
-        if query:
-            search_text = query
-        else:
-            # Fallback sur les composants structurés si query n'est pas fourni
-            search_text = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not search_text:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["Address query is empty"],
-            }
+        search_text, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_geocode_failure(msg),
+        )
+        if failure:
+            return failure
 
         params = {"searchtext": search_text, "maxresults": 1}
         if country:
@@ -262,44 +159,11 @@ class HereAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode.json", params)
 
         if "error" in result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
+            return self._build_geocode_failure(error=result["error"])
 
         response = result.get("Response", {})
         view = response.get("View", [])
-        if not view:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
-
-        results = view[0].get("Result", [])
-        if not results:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
-
-        best_result = results[0]
-        location = best_result.get("Location", {})
-        display_position = location.get("DisplayPosition", {})
-        match_quality = best_result.get("MatchQuality", {})
-
-        match_level = match_quality.get("MatchLevel", "")
+        results = view[0].get("Result", []) if view else []
         accuracy_map = {
             "houseNumber": "ROOFTOP",
             "street": "STREET",
@@ -310,22 +174,33 @@ class HereAddressBackend(BaseAddressBackend):
             "state": "REGION",
             "country": "COUNTRY",
         }
-        accuracy = accuracy_map.get(match_level, "UNKNOWN")
 
-        relevance = match_quality.get("Relevance", 0.0) / 100.0
+        def _extract_feature(result_item: Dict[str, Any]) -> Dict[str, Any]:
+            payload = self._extract_address_from_result(result_item)
+            location = result_item.get("Location", {})
+            display_position = location.get("DisplayPosition", {}) or {}
+            lat = display_position.get("Latitude")
+            lon = display_position.get("Longitude")
+            if lat is not None:
+                payload["latitude"] = float(lat)
+            if lon is not None:
+                payload["longitude"] = float(lon)
+            return payload
 
-        address = location.get("Address", {})
-        location_id = location.get("LocationId")
-
-        return {
-            "latitude": display_position.get("Latitude"),
-            "longitude": display_position.get("Longitude"),
-            "accuracy": accuracy,
-            "confidence": relevance,
-            "formatted_address": address.get("Label", ""),
-            "address_reference": str(location_id) if location_id else None,
-            "errors": [],
-        }
+        return self._feature_geocode_payload(
+            features=results,
+            extractor=_extract_feature,
+            formatted_getter=lambda item: item.get("Location", {})
+            .get("Address", {})
+            .get("Label", ""),
+            accuracy_getter=lambda item, _normalized: accuracy_map.get(
+                item.get("MatchQuality", {}).get("MatchLevel", ""), "UNKNOWN"
+            ),
+            confidence_getter=lambda item, _normalized: float(
+                (item.get("MatchQuality", {}).get("Relevance", 0.0) or 0.0) / 100.0
+            ),
+            missing_error="No address found",
+        )
 
     def reverse_geocode(
         self, latitude: float, longitude: float, **kwargs: Any
@@ -342,49 +217,28 @@ class HereAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode.json", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": [result["error"]],
-            }
+            payload = self._build_empty_address_payload(error=result["error"])
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            payload["address_reference"] = None
+            return payload
 
         response = result.get("Response", {})
         view = response.get("View", [])
         if not view:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": ["No address found"],
-            }
+            payload = self._build_empty_address_payload(error="No address found")
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            payload["address_reference"] = None
+            return payload
 
         results = view[0].get("Result", [])
         if not results:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": ["No address found"],
-            }
+            payload = self._build_empty_address_payload(error="No address found")
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            payload["address_reference"] = None
+            return payload
 
         best_result = results[0]
         normalized = self._extract_address_from_result(best_result)
@@ -411,21 +265,10 @@ class HereAddressBackend(BaseAddressBackend):
     ) -> Dict[str, Any]:
         """Retrieve an address by its LocationId using HERE Geocoding API."""
         if not address_reference:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["address_reference is required"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="address_reference is required",
+            )
 
         params = {"locationid": address_reference}
         if "language" in kwargs:
@@ -434,58 +277,24 @@ class HereAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode.json", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": [result["error"]],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference, error=result["error"]
+            )
 
         response = result.get("Response", {})
         view = response.get("View", [])
         if not view:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["No address found for this LocationId"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="No address found for this LocationId",
+            )
 
         results = view[0].get("Result", [])
         if not results:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["No address found for this LocationId"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="No address found for this LocationId",
+            )
 
         best_result = results[0]
         normalized = self._extract_address_from_result(best_result)

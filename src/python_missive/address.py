@@ -236,12 +236,18 @@ def _flatten_address_dict(payload: Mapping[str, Any]) -> Dict[str, Any]:
     for key in ("line1", "line2", "line3", "postal_code", "city", "state", "country"):
         if key in payload and payload[key]:
             flat[key] = payload[key]
+    suffixes = (
+        "line1",
+        "line2",
+        "line3",
+        "postal_code",
+        "city",
+        "state",
+        "country",
+    )
     for key in _ADDRESS_KEYS:
         value = payload.get(key)
-        if value and key.endswith(("line1", "line2", "line3")):
-            alias = key.split("_")[-1]
-            flat.setdefault(alias, value)
-        elif value and key.endswith(("postal_code", "city", "state", "country")):
+        if value and key.endswith(suffixes):
             alias = key.split("_")[-1]
             flat.setdefault(alias, value)
     if "formatted_address" in payload and payload["formatted_address"]:

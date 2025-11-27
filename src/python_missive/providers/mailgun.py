@@ -6,7 +6,6 @@ import hashlib
 import hmac
 from typing import Any, Dict, Optional, Tuple
 
-from ..status import MissiveStatus
 from .base import BaseProvider
 
 
@@ -40,46 +39,9 @@ class MailgunProvider(BaseProvider):
 
     def send_email(self, **kwargs) -> bool:
         """Send via Mailgun API"""
-        is_valid, error = self._validate_and_check_recipient(
-            "recipient_email", "Email missing"
+        return self._send_email_simulation(
+            prefix="mg", event_message="Email sent via Mailgun"
         )
-        if not is_valid:
-            self._update_status(MissiveStatus.FAILED, error_message=error)
-            return False
-
-        try:
-            # TODO: Integrate with Mailgun
-            # import requests
-            #
-            # api_key = self._config.get('MAILGUN_API_KEY')
-            # domain = self._config.get('MAILGUN_DOMAIN')
-            #
-            # response = requests.post(
-            #     f"https://api.mailgun.net/v3/{domain}/messages",
-            #     auth=("api", api_key),
-            #     data={
-            #         "from": self._config.get('DEFAULT_FROM_EMAIL'),
-            #         "to": self.missive.recipient_email,
-            #         "subject": self.missive.subject,
-            #         "text": self.missive.body,
-            #         "v:missive_id": str(self.missive.id)
-            #     }
-            # )
-            #
-            # external_id = response.json().get('id')
-
-            # Simulation
-            external_id = f"mg_{getattr(self.missive, 'id', 'unknown')}"
-
-            self._update_status(
-                MissiveStatus.SENT, provider=self.name, external_id=external_id
-            )
-            self._create_event("sent", "Email sent via Mailgun")
-
-            return True
-
-        except Exception as e:
-            return self._handle_send_error(e)
 
     def send_email_marketing(self, **kwargs) -> bool:
         """Reuse transactional pipeline for marketing blasts."""
@@ -140,35 +102,17 @@ class MailgunProvider(BaseProvider):
         Returns:
             Dict with status, credits, etc.
         """
-        last_check = self._get_last_check_time()
-
-        return {
-            "status": "unknown",
-            "is_available": None,
-            "services": self._get_services(),
-            "credits": {
-                "type": "emails",
-                "remaining": None,
-                "currency": "emails",
-                "limit": None,
-                "percentage": None,
-            },
-            "rate_limits": {
-                "per_second": 100,
-                "per_minute": 6000,
-            },
-            "sla": {
-                "uptime_percentage": 99.99,
-            },
-            "last_check": last_check,
-            "warnings": ["Mailgun API not implemented - uncomment the code"],
-            "details": {
+        return self._build_generic_service_status(
+            credits_type="emails",
+            credits_currency="emails",
+            rate_limits={"per_second": 100, "per_minute": 6000},
+            warnings=["Mailgun API not implemented - uncomment the code"],
+            details={
                 "status_page": "https://status.mailgun.com/",
-                "api_docs": (
-                    "https://documentation.mailgun.com/en/latest/api-stats.html"
-                ),
+                "api_docs": "https://documentation.mailgun.com/en/latest/api-stats.html",
             },
-        }
+            sla={"uptime_percentage": 99.99},
+        )
 
 
 __all__ = ["MailgunProvider"]

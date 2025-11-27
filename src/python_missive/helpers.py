@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import re
+from contextlib import suppress
 from functools import cmp_to_key
 from pathlib import Path
 from typing import (
@@ -57,23 +58,19 @@ def _load_country_phone_codes() -> Dict[str, List[str]]:
         return {}
 
     loaded_codes: Dict[str, List[str]] = {}
-    try:
-        with open(csv_path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                country_code = row.get("cca2", "").upper()
-                phone_codes_str = row.get("phone_codes", "").strip()
-                if country_code and phone_codes_str:
-                    # Handle multiple codes separated by semicolons
-                    codes = [
-                        code.strip().lstrip("+")
-                        for code in phone_codes_str.split(";")
-                        if code.strip()
-                    ]
-                    if codes:
-                        loaded_codes[country_code] = codes
-    except Exception:
-        pass
+    with suppress(Exception), open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            country_code = row.get("cca2", "").upper()
+            phone_codes_str = row.get("phone_codes", "").strip()
+            if country_code and phone_codes_str:
+                codes = [
+                    code.strip().lstrip("+")
+                    for code in phone_codes_str.split(";")
+                    if code.strip()
+                ]
+                if codes:
+                    loaded_codes[country_code] = codes
 
     # Update global cache
     _COUNTRY_PHONE_CODES.update(loaded_codes)
@@ -1402,3 +1399,91 @@ def search_addresses(
         response["errors"] = result.get("errors", [])
 
     return response
+
+
+def get_address_by_reference(
+    backends_config: Sequence[Dict[str, Any]] | None,
+    *,
+    backend: str | Sequence[str],
+    address_reference: str,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """Retrieve a single address payload using a backend reference ID.
+
+    Args:
+        backends_config: List of backend configurations (same format as for search).
+        backend: Backend name or iterable of backend names to try (case-insensitive).
+        address_reference: Reference identifier returned by a backend (place_id, osm_id, ...).
+        **kwargs: Extra parameters forwarded to the backend implementation.
+
+    Returns:
+        Backend payload (dict). On error, returns a payload with ``error``/``errors`` keys.
+    """
+    if not backends_config:
+        return {
+            "error": "No backends configuration provided",
+            "errors": ["No address backends configured"],
+        }
+    if not address_reference or not isinstance(address_reference, str):
+        return {
+            "error": "Address reference is required",
+            "errors": ["address_reference must be a non-empty string"],
+        }
+    if not backend:
+        return {
+            "error": "Backend name is required",
+            "errors": ["backend parameter is required to resolve an address reference"],
+        }
+
+    backend_names: Sequence[str]
+    if isinstance(backend, str):
+        backend_names = [backend]
+    else:
+        backend_names = list(backend)
+
+    filtered_configs = _filter_backend_configs_by_name(backends_config, backend_names)
+    if not filtered_configs:
+        backend_display = (
+            backend if isinstance(backend, str) else ", ".join(str(b) for b in backend)
+        )
+        return {
+            "error": f"Backend '{backend_display}' not found",
+            "errors": ["No matching backend in configuration"],
+            "backend_reference": address_reference,
+        }
+
+    backends = get_address_backends_from_config(filtered_configs)
+    if not backends:
+        return {
+            "error": "No working backends found",
+            "errors": ["Requested backend is not available"],
+            "backend_reference": address_reference,
+        }
+
+    last_error: Optional[Dict[str, Any]] = None
+    for backend_instance in backends:
+        backend_name = getattr(backend_instance, "name", "") or backend_instance.__class__.__name__
+        try:
+            payload = backend_instance.get_address_by_reference(address_reference, **kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            last_error = {
+                "error": str(exc),
+                "errors": [str(exc)],
+                "backend_reference": address_reference,
+                "backend_used": backend_name,
+            }
+            continue
+
+        payload = dict(payload or {})
+        payload.setdefault("backend_reference", address_reference)
+        payload.setdefault("backend_used", backend_name)
+        if payload.get("error"):
+            last_error = payload
+            continue
+        return payload
+
+    return last_error or {
+        "error": "No backend returned data for this reference",
+        "errors": ["get_address_by_reference failed for all requested backends"],
+        "backend_reference": address_reference,
+    }

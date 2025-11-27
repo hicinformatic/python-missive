@@ -5,10 +5,11 @@ from __future__ import annotations
 import smtplib
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from ..status import MissiveStatus
 from .base import BaseProvider
+from .base.email_message import build_email_message
 
 
 class DjangoEmailProvider(BaseProvider):
@@ -114,95 +115,22 @@ class DjangoEmailProvider(BaseProvider):
     def get_service_status(self) -> Dict[str, Any]:
         """Return lightweight status for monitoring screens."""
         backend = "smtp" if self._raw_config.get("EMAIL_HOST") else "file"
-        return {
-            "status": "operational",
-            "is_available": True,
-            "services": self._get_services(),
-            "credits": {
-                "type": "unlimited",
-                "remaining": None,
-                "currency": "",
-                "limit": None,
-                "percentage": None,
-            },
-            "last_check": self._get_last_check_time(),
-            "warnings": [],
-            "details": {"backend": backend},
-        }
+        return self._build_generic_service_status(
+            status="operational",
+            is_available=True,
+            credits_type="unlimited",
+            rate_limits={},
+            details={"backend": backend},
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _collect_attachments(self) -> List[Dict[str, Any]]:
-        attachments: List[Dict[str, Any]] = []
-        source = self._get_missive_value("attachments") or getattr(
-            self.missive, "attachments", None
-        )
-        if not source:
-            return attachments
-
-        items: Iterable[Any]
-        if isinstance(source, Iterable):
-            items = source
-        elif hasattr(source, "all"):
-            items = source.all()  # type: ignore[assignment]
-        else:
-            items = []
-
-        for attachment in items:
-            try:
-                payload = self.add_attachment_email(attachment)
-                attachments.append(payload)
-            except (OSError, AttributeError, ValueError):
-                continue
-        return attachments
-
     def _build_email_message(self, recipient: str) -> EmailMessage:
-        subject = str(self._get_missive_value("subject") or "Missive")
-        body_html = self._get_missive_value("body") or ""
-        body_text = self._get_missive_value("body_text") or (
-            body_html if body_html and "<" not in body_html else ""
-        )
-
-        message = EmailMessage()
         from_email = str(
             self._raw_config.get("DEFAULT_FROM_EMAIL") or "noreply@example.com"
         )
-        message["Subject"] = subject
-        message["From"] = from_email
-        message["To"] = recipient
-
-        self._set_message_body(message, body_text, body_html)
-        self._attach_files_to_message(message)
-        return message
-
-    def _set_message_body(
-        self, message: EmailMessage, body_text: str, body_html: str
-    ) -> None:
-        if body_text:
-            message.set_content(body_text)
-        else:
-            message.set_content(" ")
-
-        if body_html and body_html != body_text:
-            message.add_alternative(body_html, subtype="html")
-
-    def _attach_files_to_message(self, message: EmailMessage) -> None:
-        for attachment in self._collect_attachments():
-            content = attachment.get("content")
-            if not content:
-                continue
-
-            filename = attachment.get("filename") or "attachment"
-            mime = attachment.get("mime_type") or "application/octet-stream"
-            maintype, _, subtype = mime.partition("/")
-            subtype = subtype or "octet-stream"
-            message.add_attachment(
-                content,
-                maintype=maintype,
-                subtype=subtype,
-                filename=filename,
-            )
+        return build_email_message(self, recipient, from_email=from_email)
 
     def _deliver(self, message: EmailMessage) -> str:
         if self._bool_config("EMAIL_SUPPRESS_SEND", False):

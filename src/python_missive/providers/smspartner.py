@@ -305,33 +305,21 @@ class SMSPartnerProvider(BaseProvider):
     def calculate_voice_call_delivery_risk(
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
-        target = missive if missive is not None else self.missive
-        if not target:
-            return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
-                "should_send": False,
-            }
+        _target, fallback, *_ = self._start_risk_analysis(missive)
+        if fallback is not None or _target is None:
+            return fallback or self._risk_missing_missive_payload()
 
         phone = self._get_missive_value("recipient_phone")
         if not phone:
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
+                **self._risk_missing_missive_payload(),
                 "recommendations": ["Recipient phone missing"],
-                "should_send": False,
             }
 
         if not self._get_api_key():
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
+                **self._risk_missing_missive_payload(),
                 "recommendations": ["SMSPARTNER_API_KEY not configured"],
-                "should_send": False,
             }
 
         return {

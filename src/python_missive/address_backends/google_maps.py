@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, Optional
 
 from .base import BaseAddressBackend
 
@@ -29,32 +29,6 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         super().__init__(config)
         self._api_key = self._config.get("GOOGLE_MAPS_API_KEY")
 
-    def _build_address_string(
-        self,
-        address_line1: Optional[str] = None,
-        address_line2: Optional[str] = None,
-        address_line3: Optional[str] = None,
-        city: Optional[str] = None,
-        postal_code: Optional[str] = None,
-        state: Optional[str] = None,
-        country: Optional[str] = None,
-    ) -> str:
-        """Build a query string from address components."""
-        parts = []
-        if address_line1:
-            parts.append(address_line1)
-        if address_line2:
-            parts.append(address_line2)
-        if city:
-            parts.append(city)
-        if postal_code:
-            parts.append(postal_code)
-        if state:
-            parts.append(state)
-        if country:
-            parts.append(country)
-        return ", ".join(filter(None, parts))
-
     def _make_request(
         self, endpoint: str, params: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -62,31 +36,13 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         if not self._api_key:
             return {"error": "GOOGLE_MAPS_API_KEY not configured"}
 
-        try:
-            import requests
-        except ImportError:
-            return {"error": "requests package not installed"}
-
-        base_url = "https://maps.googleapis.com/maps/api"
-        url = f"{base_url}{endpoint}"
-
-        request_params: Dict[str, Any] = {"key": self._api_key}
-        if params:
-            request_params.update(params)
-
-        try:
-            response = requests.get(url, params=request_params, timeout=10)
-            response.raise_for_status()
-            return cast(Dict[str, Any], response.json())
-        except requests.exceptions.HTTPError as e:
-            try:
-                error_data = response.json()
-                error_msg = error_data.get("error_message", str(e))
-            except Exception:
-                error_msg = str(e)
-            return {"error": error_msg}
-        except requests.exceptions.RequestException as e:
-            return {"error": str(e)}
+        default_params: Dict[str, Any] = {"key": self._api_key}
+        return self._request_json(
+            "https://maps.googleapis.com/maps/api",
+            endpoint,
+            params,
+            default_params=default_params,
+        )
 
     def validate_address(
         self,
@@ -101,30 +57,13 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using Google Maps Geocoding API."""
-        # Si query est fourni, l'utiliser directement (priorité sur les composants)
-        if query:
-            address = query
-        else:
-            # Fallback sur les composants structurés si query n'est pas fourni
-            address = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not address:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["Address query is empty"],
-            }
+        address, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_validation_failure(error=msg),
+        )
+        if failure:
+            return failure
 
         params = {"address": address}
         if country:
@@ -133,38 +72,17 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode/json", params)
 
         if "error" in result:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [result["error"]],
-            }
+            return self._build_validation_failure(error=result["error"])
 
         if result.get("status") != "OK":
             error_msg = result.get(
                 "error_message", result.get("status", "Unknown error")
             )
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": [error_msg],
-            }
+            return self._build_validation_failure(error=error_msg)
 
         results = result.get("results", [])
         if not results:
-            return {
-                "is_valid": False,
-                "normalized_address": {},
-                "confidence": 0.0,
-                "suggestions": [],
-                "warnings": [],
-                "errors": ["No address found"],
-            }
+            return self._build_validation_failure(error="No address found")
 
         best_match = results[0]
         normalized = self._extract_address_from_result(best_match)
@@ -225,30 +143,13 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using Google Maps."""
-        # Si query est fourni, l'utiliser directement (priorité sur les composants)
-        if query:
-            address = query
-        else:
-            # Fallback sur les composants structurés si query n'est pas fourni
-            address = self._build_address_string(
-                address_line1,
-                address_line2,
-                address_line3,
-                city,
-                postal_code,
-                state,
-                country,
-            )
-
-        if not address:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["Address query is empty"],
-            }
+        address, failure = self._resolve_components_query(
+            query=query,
+            context=locals(),
+            failure_builder=lambda msg: self._build_geocode_failure(msg),
+        )
+        if failure:
+            return failure
 
         params = {"address": address}
         if country:
@@ -257,38 +158,17 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode/json", params)
 
         if "error" in result:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [result["error"]],
-            }
+            return self._build_geocode_failure(error=result["error"])
 
         if result.get("status") != "OK":
             error_msg = result.get(
                 "error_message", result.get("status", "Unknown error")
             )
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": [error_msg],
-            }
+            return self._build_geocode_failure(error=error_msg)
 
         results = result.get("results", [])
         if not results:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "accuracy": None,
-                "confidence": 0.0,
-                "formatted_address": None,
-                "errors": ["No address found"],
-            }
+            return self._build_geocode_failure(error="No address found")
 
         best_result = results[0]
         geometry = best_result.get("geometry", {})
@@ -333,50 +213,26 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode/json", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": [result["error"]],
-            }
+            payload = self._build_empty_address_payload(error=result["error"])
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            return payload
 
         if result.get("status") != "OK":
             error_msg = result.get(
                 "error_message", result.get("status", "Unknown error")
             )
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": [error_msg],
-            }
+            payload = self._build_empty_address_payload(error=error_msg)
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            return payload
 
         results = result.get("results", [])
         if not results:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "confidence": 0.0,
-                "errors": ["No address found"],
-            }
+            payload = self._build_empty_address_payload(error="No address found")
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            return payload
 
         best_result = results[0]
         normalized = self._extract_address_from_result(best_result)
@@ -406,21 +262,10 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
     ) -> Dict[str, Any]:
         """Retrieve an address by its place_id using Google Maps Places API."""
         if not address_reference:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["address_reference is required"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="address_reference is required",
+            )
 
         params = {"place_id": address_reference}
         if "language" in kwargs:
@@ -429,59 +274,24 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         result = self._make_request("/geocode/json", params)
 
         if "error" in result:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": [result["error"]],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference, error=result["error"]
+            )
 
         if result.get("status") != "OK":
             error_msg = result.get(
                 "error_message", result.get("status", "Unknown error")
             )
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": [error_msg],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference, error=error_msg
+            )
 
         results = result.get("results", [])
         if not results:
-            return {
-                "address_line1": None,
-                "address_line2": None,
-                "address_line3": None,
-                "city": None,
-                "postal_code": None,
-                "state": None,
-                "country": None,
-                "formatted_address": None,
-                "latitude": None,
-                "longitude": None,
-                "confidence": 0.0,
-                "address_reference": address_reference,
-                "errors": ["No address found for this place_id"],
-            }
+            return self._build_empty_address_payload(
+                address_reference=address_reference,
+                error="No address found for this place_id",
+            )
 
         best_result = results[0]
         normalized = self._extract_address_from_result(best_result)

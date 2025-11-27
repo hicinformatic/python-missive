@@ -8,7 +8,6 @@ import hmac
 import json
 from typing import Any, Dict, Optional, Tuple
 
-from ..status import MissiveStatus
 from .base import BaseProvider
 
 
@@ -40,29 +39,9 @@ class SendGridProvider(BaseProvider):
 
     def send_email(self, **kwargs) -> bool:
         """Sends email via SendGrid API."""
-        is_valid, error = self._validate_and_check_recipient(
-            "recipient_email", "Email missing"
+        return self._send_email_simulation(
+            prefix="sg", event_message="Email sent via SendGrid"
         )
-        if not is_valid:
-            self._update_status(MissiveStatus.FAILED, error_message=error)
-            return False
-
-        try:
-            # response = sg.send(message)
-            # external_id = response.headers.get('X-Message-Id')
-
-            # Simulation
-            external_id = f"sg_{getattr(self.missive, 'id', 'unknown')}"
-
-            self._update_status(
-                MissiveStatus.SENT, provider=self.name, external_id=external_id
-            )
-            self._create_event("sent", "Email sent via SendGrid")
-
-            return True
-
-        except Exception as e:
-            return self._handle_send_error(e)
 
     def send_email_marketing(self, **kwargs) -> bool:
         """Marketing campaigns follow the transactional send path."""
@@ -162,37 +141,20 @@ class SendGridProvider(BaseProvider):
         Returns:
             Dict with status, credits, etc.
         """
-        last_check = self._get_last_check_time()
-
-        return {
-            "status": "unknown",
-            "is_available": None,
-            "services": self._get_services(),
-            "credits": {
-                "type": "emails",
-                "remaining": None,
-                "currency": "emails",
-                "limit": None,
-                "percentage": None,
-            },
-            "rate_limits": {
-                "per_second": 10,  # Depends on SendGrid plan
-                "per_minute": 600,
-            },
-            "sla": {
-                "uptime_percentage": 99.99,  # SLA SendGrid
-                "response_time_ms": 100,
-            },
-            "last_check": last_check,
-            "warnings": ["SendGrid API not implemented - uncomment the code"],
-            "details": {
+        return self._build_generic_service_status(
+            credits_type="emails",
+            credits_currency="emails",
+            rate_limits={"per_second": 10, "per_minute": 600},
+            warnings=["SendGrid API not implemented - uncomment the code"],
+            details={
                 "status_page": "https://status.sendgrid.com/",
                 "api_docs": (
                     "https://docs.sendgrid.com/api-reference/"
                     "stats/retrieve-email-statistics"
                 ),
             },
-        }
+            sla={"uptime_percentage": 99.99, "response_time_ms": 100},
+        )
 
 
 __all__ = ["SendGridProvider"]

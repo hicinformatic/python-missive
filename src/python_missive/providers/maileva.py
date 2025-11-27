@@ -7,6 +7,10 @@ from typing import Any, Dict, Optional, Tuple, cast
 
 from ..status import MissiveStatus
 from .base import BaseProvider
+from .base.postal_defaults import (
+    POSTAL_DEFAULT_MIME_TYPES,
+    POSTAL_ENVELOPE_LIMITS,
+)
 
 
 class MailevaProvider(BaseProvider):
@@ -32,36 +36,15 @@ class MailevaProvider(BaseProvider):
         "LRE_QUALIFIED",
         "ERE",
     ]
-    _POSTAL_MIME_TYPES = [
-        "application/pdf",  # Adobe PDF
-        "application/msword",  # .doc
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
-        "application/rtf",  # Rich Text Format
-        "text/plain",  # .txt
-        "application/vnd.ms-excel",  # .xls
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
-    ]
-    _POSTAL_ENVELOPE_LIMITS = [
-        {
-            "format": "C4 double-window",
-            "dimensions_mm": "210x300",
-            "max_sheets": 45,  # Includes address sheet and return envelope
-        },
-        {
-            "format": "DL simple/double-window",
-            "dimensions_mm": "114x229",
-            "max_sheets": 5,  # Includes address sheet and return envelope
-        },
-    ]
     # Postal simple
     postal_price = 1.435
     postal_page_price_black_white = 0.33
     postal_page_price_color = 0.58
     postal_page_price_single_sided = 0.33
     postal_page_price_duplex = 0.34
-    postal_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_allowed_attachment_mime_types = list(POSTAL_DEFAULT_MIME_TYPES)
     postal_allowed_page_formats = ["A4"]
-    postal_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_envelope_limits = [limit.copy() for limit in POSTAL_ENVELOPE_LIMITS]
     postal_page_limit = 45
     postal_color_printing_available = True
     postal_duplex_printing_available = True
@@ -73,9 +56,9 @@ class MailevaProvider(BaseProvider):
     postal_registered_page_price_color = 0.58
     postal_registered_page_price_single_sided = 0.33
     postal_registered_page_price_duplex = 0.34
-    postal_registered_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_registered_allowed_attachment_mime_types = list(POSTAL_DEFAULT_MIME_TYPES)
     postal_registered_allowed_page_formats = ["A4"]
-    postal_registered_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_registered_envelope_limits = [limit.copy() for limit in POSTAL_ENVELOPE_LIMITS]
     postal_registered_page_limit = 45
     postal_registered_color_printing_available = True
     postal_registered_duplex_printing_available = True
@@ -87,9 +70,9 @@ class MailevaProvider(BaseProvider):
     postal_signature_page_price_color = 0.58
     postal_signature_page_price_single_sided = 0.33
     postal_signature_page_price_duplex = 0.34
-    postal_signature_allowed_attachment_mime_types = _POSTAL_MIME_TYPES
+    postal_signature_allowed_attachment_mime_types = list(POSTAL_DEFAULT_MIME_TYPES)
     postal_signature_allowed_page_formats = ["A4"]
-    postal_signature_envelope_limits = _POSTAL_ENVELOPE_LIMITS
+    postal_signature_envelope_limits = [limit.copy() for limit in POSTAL_ENVELOPE_LIMITS]
     postal_signature_page_limit = 45
     postal_signature_color_printing_available = True
     postal_signature_duplex_printing_available = True
@@ -280,25 +263,6 @@ class MailevaProvider(BaseProvider):
             self._create_event("failed", str(e))
             return False
 
-    def send_postal(self, **kwargs) -> bool:
-        """Send simple postal mail via Maileva."""
-        return self._send_postal_service(service="postal", **kwargs)
-
-    def send_postal_registered(self, **kwargs) -> bool:
-        """Send registered postal mail via Maileva."""
-        return self._send_postal_service(
-            service="postal_registered", is_registered=True, **kwargs
-        )
-
-    def send_postal_signature(self, **kwargs) -> bool:
-        """Send registered mail with signature via Maileva."""
-        return self._send_postal_service(
-            service="postal_signature",
-            is_registered=True,
-            requires_signature=True,
-            **kwargs,
-        )
-
     def _send_electronic_registered(self, service: str, *, description: str) -> bool:
         """Simulate electronic registered (LRE/ERE) sending."""
         is_valid, error = self.validate()
@@ -467,35 +431,16 @@ class MailevaProvider(BaseProvider):
         Returns:
             Dict with status, credits, etc.
         """
-        clock = getattr(self, "_clock", None)
-        last_check = clock() if callable(clock) else datetime.now(timezone.utc)
-
-        return {
-            "status": "unknown",
-            "is_available": None,
-            "services": self._get_services(),
-            "credits": {
-                "type": "money",
-                "remaining": None,
-                "currency": "EUR",
-                "limit": None,
-                "percentage": None,
-            },
-            "rate_limits": {
-                "per_second": 5,
-                "per_minute": 300,
-            },
-            "sla": {
-                "uptime_percentage": 99.5,
-            },
-            "last_check": last_check,
-            "warnings": ["Maileva API not fully implemented - uncomment the code"],
-            "details": {
+        return self._build_service_status_payload(
+            rate_limits={"per_second": 5, "per_minute": 300},
+            warnings=["Maileva API not fully implemented - uncomment the code"],
+            details={
                 "refill_url": "https://www.maileva.com/",
                 "api_docs": "https://www.maileva.com/developpeur",
                 "sandbox_url": "https://secure2.recette.maileva.com/",
             },
-        }
+            sla={"uptime_percentage": 99.5},
+        )
 
     def get_postal_service_info(self) -> Dict[str, Any]:
         """Get postal service information."""

@@ -6,9 +6,14 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...status import MissiveStatus
+from ._attachments import (
+    AttachmentMimeTypeMixin,
+    attachment_check_empty_result,
+    summarize_attachment_validation,
+)
 
 
-class BaseEmailMixin:
+class BaseEmailMixin(AttachmentMimeTypeMixin):
     """Email-specific functionality mixin."""
 
     # Default limit for email attachments (in MB)
@@ -256,74 +261,6 @@ class BaseEmailMixin:
             "mime_type": getattr(attachment, "mime_type", None),
         }
 
-    def _check_attachment_mime_type(
-        self, attachment: Any, idx: int
-    ) -> tuple[List[str], List[str]]:
-        """Check MIME type for a single attachment."""
-        errors: List[str] = []
-        warnings: List[str] = []
-
-        mime_type = getattr(attachment, "mime_type", None)
-        if mime_type:
-            if (
-                self.allowed_attachment_mime_types
-                and mime_type not in self.allowed_attachment_mime_types
-            ):
-                errors.append(
-                    f"Attachment {idx + 1}: MIME type '{mime_type}' not allowed. "
-                    f"Allowed types: {', '.join(self.allowed_attachment_mime_types)}"
-                )
-        else:
-            warnings.append(f"Attachment {idx + 1}: MIME type not specified")
-
-        return errors, warnings
-
-    def _get_attachment_size(self, attachment: Any) -> Optional[int]:
-        """Get attachment size in bytes, trying multiple methods."""
-        size_bytes = getattr(attachment, "size_bytes", None)
-        if size_bytes is not None:
-            return size_bytes
-
-        # Try to get size from file object
-        file_obj = getattr(attachment, "file", None)
-        if file_obj and hasattr(file_obj, "read"):
-            try:
-                current_pos = file_obj.tell() if hasattr(file_obj, "tell") else 0
-                file_obj.seek(0, 2)  # Seek to end
-                size_bytes = file_obj.tell() if hasattr(file_obj, "tell") else None
-                file_obj.seek(current_pos)  # Restore position
-                return size_bytes
-            except Exception:
-                pass
-
-        return None
-
-    def _check_attachment_size(
-        self, attachment: Any, idx: int, max_size_bytes: int
-    ) -> tuple[Optional[int], List[str], List[str]]:
-        """Check file size for a single attachment."""
-        errors: List[str] = []
-        warnings: List[str] = []
-
-        size_bytes = self._get_attachment_size(attachment)
-        if size_bytes is not None:
-            try:
-                size_bytes = int(size_bytes)
-                if size_bytes > max_size_bytes:
-                    size_mb = size_bytes / (1024 * 1024)
-                    max_mb = self.max_email_attachment_size_mb
-                    errors.append(
-                        f"Attachment {idx + 1}: Size {size_mb:.2f} MB exceeds maximum "
-                        f"of {max_mb} MB"
-                    )
-                return size_bytes, errors, warnings
-            except (ValueError, TypeError):
-                warnings.append(f"Attachment {idx + 1}: Invalid size_bytes value")
-        else:
-            warnings.append(f"Attachment {idx + 1}: File size not specified")
-
-        return None, errors, warnings
-
     def check_attachments(self, attachments: List[Any]) -> Dict[str, Any]:
         """
         Validate email attachments against size and MIME type limits.
@@ -341,70 +278,29 @@ class BaseEmailMixin:
                 - warnings: List[str] of warning messages
                 - details: Dict with per-attachment validation details
         """
-        errors: List[str] = []
-        warnings: List[str] = []
-        details: Dict[str, Any] = {
-            "total_size_bytes": 0,
-            "attachments_checked": 0,
-            "attachments_valid": 0,
-        }
-
         if not attachments:
-            return {
-                "is_valid": True,
-                "errors": [],
-                "warnings": [],
-                "details": details,
-            }
+            return attachment_check_empty_result()
 
-        total_size_bytes = 0
         max_size_bytes = self.max_email_attachment_size_bytes
-
-        for idx, attachment in enumerate(attachments):
-            attachment_errors: List[str] = []
-            attachment_warnings: List[str] = []
-
-            # Check MIME type
-            mime_errors, mime_warnings = self._check_attachment_mime_type(
+        return summarize_attachment_validation(
+            attachments=attachments,
+            mime_checker=lambda attachment, idx: self._check_attachment_mime_type(
                 attachment, idx
-            )
-            attachment_errors.extend(mime_errors)
-            attachment_warnings.extend(mime_warnings)
-
-            # Check file size
-            size_bytes, size_errors, size_warnings = self._check_attachment_size(
+            ),
+            size_checker=lambda attachment, idx: self._check_attachment_size(
                 attachment, idx, max_size_bytes
-            )
-            attachment_errors.extend(size_errors)
-            attachment_warnings.extend(size_warnings)
-
-            if size_bytes is not None:
-                total_size_bytes += size_bytes
-
-            if attachment_errors:
-                errors.extend(attachment_errors)
-            if attachment_warnings:
-                warnings.extend(attachment_warnings)
-
-            details["attachments_checked"] += 1
-            if not attachment_errors:
-                details["attachments_valid"] += 1
-
-        # Check total size across all attachments
-        details["total_size_bytes"] = total_size_bytes
-        total_size_mb = total_size_bytes / (1024 * 1024)
-        if total_size_bytes > max_size_bytes:
-            errors.append(
-                f"Total attachment size ({total_size_mb:.2f} MB) exceeds maximum "
-                f"of {self.max_email_attachment_size_mb} MB"
-            )
-
-        return {
-            "is_valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings,
-            "details": details,
-        }
+            ),
+            max_size_bytes=max_size_bytes,
+            max_size_mb=float(self.max_email_attachment_size_mb),
+            size_error_template=(
+                "Total attachment size ({total_mb:.2f} MB) exceeds maximum of {max_mb:.2f} MB"
+            ),
+            details_factory=lambda: {
+                "total_size_bytes": 0,
+                "attachments_checked": 0,
+                "attachments_valid": 0,
+            },
+        )
 
     def calculate_spam_score(self, subject: str, body: str) -> Dict[str, Any]:
         """Compute a spam score for email content."""
@@ -432,58 +328,50 @@ class BaseEmailMixin:
         self, missive: Optional[Any] = None
     ) -> Dict[str, Any]:
         """Calculate delivery risk for email missives."""
-        target_missive = (
-            missive if missive is not None else getattr(self, "missive", None)
-        )
-        if not target_missive:
+
+        def _handler(
+            target_missive: Any,
+            factors: Dict[str, Any],
+            recommendations: List[str],
+            total_risk: float,
+        ) -> Dict[str, Any]:
+            email = getattr(self, "_get_missive_value", lambda x, d=None: d)(
+                "get_recipient_email"
+            ) or getattr(target_missive, "recipient_email", None)
+            if not email:
+                email = getattr(self, "_get_missive_value", lambda x, d=None: d)(
+                    "recipient_email"
+                )
+
+            if not email:
+                recommendations.append("Recipient email missing")
+                total_risk_local = 100.0
+            else:
+                email_validation = self.validate_email(str(email))
+                factors["email_validation"] = email_validation
+                total_risk_local = total_risk + email_validation.get("risk_score", 0) * 0.6
+                recommendations.extend(email_validation.get("warnings", []))
+
+            risk_score = min(int(total_risk_local), 100)
+            risk_level = getattr(
+                self,
+                "_calculate_risk_level",
+                lambda x: (
+                    "critical"
+                    if x >= 75
+                    else "high" if x >= 50 else "medium" if x >= 25 else "low"
+                ),
+            )(risk_score)
+
             return {
-                "risk_score": 100,
-                "risk_level": "critical",
-                "factors": {},
-                "recommendations": ["No missive to analyze"],
-                "should_send": False,
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "factors": factors,
+                "recommendations": recommendations,
+                "should_send": risk_score < 70,
             }
 
-        factors: Dict[str, Any] = {}
-        recommendations: List[str] = []
-        total_risk = 0.0
-
-        email = getattr(self, "_get_missive_value", lambda x, d=None: d)(
-            "get_recipient_email"
-        ) or getattr(target_missive, "recipient_email", None)
-        if not email:
-            email = getattr(self, "_get_missive_value", lambda x, d=None: d)(
-                "recipient_email"
-            )
-
-        if not email:
-            recommendations.append("Recipient email missing")
-            total_risk = 100
-        else:
-            email_validation = self.validate_email(str(email))
-            factors["email_validation"] = email_validation
-            total_risk += email_validation.get("risk_score", 0) * 0.6
-            recommendations.extend(email_validation.get("warnings", []))
-
-        risk_score = min(int(total_risk), 100)
-        # Security: "_calculate_risk_level" is a fixed string, not user input
-        risk_level = getattr(
-            self,
-            "_calculate_risk_level",
-            lambda x: (
-                "critical"
-                if x >= 75
-                else "high" if x >= 50 else "medium" if x >= 25 else "low"
-            ),
-        )(risk_score)
-
-        return {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "factors": factors,
-            "recommendations": recommendations,
-            "should_send": risk_score < 70,
-        }
+        return self._run_risk_analysis(missive, _handler)
 
     def calculate_email_marketing_delivery_risk(
         self, missive: Optional[Any] = None

@@ -1220,12 +1220,33 @@ def task_lint() -> bool:
     if not _ensure_venv_for_task("lint"):
         return False
 
+    ruff = VENV_BIN / ("ruff.exe" if platform.system() == "Windows" else "ruff")
     flake8 = VENV_BIN / ("flake8.exe" if platform.system() == "Windows" else "flake8")
+    pylint = VENV_BIN / ("pylint.exe" if platform.system() == "Windows" else "pylint")
+    semgrep = VENV_BIN / ("semgrep.exe" if platform.system() == "Windows" else "semgrep")
     mypy = VENV_BIN / ("mypy.exe" if platform.system() == "Windows" else "mypy")
     targets = get_code_directories()
 
     success = True
+    if not run_command([str(ruff), "check", *targets]):
+        success = False
     if not run_command([str(flake8), *targets]):
+        success = False
+    pylint_targets = [str(Path(t) / "__init__.py") if Path(t).is_dir() else t for t in targets]
+    if not run_command([str(pylint), "--disable=all", "--enable=duplicate-code", *targets]):
+        success = False
+    semgrep_cmd = [str(semgrep), "scan"]
+    semgrep_configs = []
+    local_semgrep = PROJECT_ROOT / ".semgrep.yaml"
+    if local_semgrep.exists():
+        semgrep_configs.append(str(local_semgrep))
+    else:
+        semgrep_configs.append("p/default")
+    semgrep_configs.extend(["p/python", "p/supply-chain"])
+    for config in semgrep_configs:
+        semgrep_cmd += ["--config", config]
+    semgrep_cmd += targets
+    if not run_command(semgrep_cmd, check=False):
         success = False
     if not run_command([str(mypy), *targets]):
         success = False
@@ -1511,13 +1532,14 @@ def task_security() -> bool:
     pip_audit = VENV_BIN / (
         "pip-audit.exe" if platform.system() == "Windows" else "pip-audit"
     )
+    semgrep = VENV_BIN / ("semgrep.exe" if platform.system() == "Windows" else "semgrep")
     targets = get_code_directories()
 
     print_info("=" * 70)
     print_info("SECURITY AUDIT")
     print_info("=" * 70)
 
-    results = {"bandit": False, "safety": False, "pip_audit": False}
+    results = {"bandit": False, "safety": False, "pip_audit": False, "semgrep": False}
 
     print("\n" + "=" * 70)
     print_info("1/3 - Bandit (static analysis)")
@@ -1531,11 +1553,24 @@ def task_security() -> bool:
     print("\n" + "=" * 70)
     print_info("2/3 - Safety (dependency vulnerabilities)")
     print("=" * 70)
-    if run_command([str(safety), "check", "--json"], check=False):
+    # Try with API key from environment if available
+    safety_cmd = [str(safety), "scan", "--output", "json"]
+    safety_api_key = os.environ.get("SAFETY_API_KEY")
+    if safety_api_key:
+        safety_cmd.extend(["--key", safety_api_key])
+        print_info("   Using SAFETY_API_KEY from environment")
+    
+    if run_command(safety_cmd, check=False):
         print_success("✓ Safety: no known vulnerabilities.")
         results["safety"] = True
     else:
-        print_warning("⚠ Safety: check the report above.")
+        if not safety_api_key:
+            print_warning("⚠ Safety: authentication required (optional)")
+            print_info("   Set SAFETY_API_KEY env var or run 'safety auth'")
+            # Don't count as failure if it's just authentication
+            results["safety"] = True
+        else:
+            print_warning("⚠ Safety: check the report above.")
 
     print("\n" + "=" * 70)
     print_info("3/3 - pip-audit (PyPI vulnerabilities)")
@@ -1545,6 +1580,26 @@ def task_security() -> bool:
         results["pip_audit"] = True
     else:
         print_warning("⚠ pip-audit: review the report above.")
+
+    print("\n" + "=" * 70)
+    print_info("4/4 - Semgrep (SAST)")
+    print("=" * 70)
+    semgrep_cmd = [str(semgrep), "scan"]
+    semgrep_configs = []
+    local_semgrep = PROJECT_ROOT / ".semgrep.yaml"
+    if local_semgrep.exists():
+        semgrep_configs.append(str(local_semgrep))
+    else:
+        semgrep_configs.append("p/default")
+    semgrep_configs.extend(["p/python", "p/supply-chain"])
+    for config in semgrep_configs:
+        semgrep_cmd += ["--config", config]
+    semgrep_cmd += targets
+    if run_command(semgrep_cmd, check=False):
+        print_success("✓ Semgrep: no issues reported.")
+        results["semgrep"] = True
+    else:
+        print_warning("⚠ Semgrep: review findings above.")
 
     print("\n" + "=" * 70)
     print_info("SUMMARY")

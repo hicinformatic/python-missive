@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..status import MissiveStatus
 from .base import BaseProvider
+from .base.email_message import build_email_message
 
 
 class SMTPProvider(BaseProvider):
@@ -106,22 +107,15 @@ class SMTPProvider(BaseProvider):
 
     def get_service_status(self) -> Dict[str, Any]:
         """Return lightweight availability info."""
-        status = self.get_email_service_info()
-        return {
-            "status": "operational",
-            "is_available": True,
-            "services": self._get_services(),
-            "credits": {
-                "type": "unlimited",
-                "remaining": None,
-                "currency": "",
-                "limit": None,
-                "percentage": None,
-            },
-            "last_check": self._get_last_check_time(),
-            "warnings": status.get("warnings", []),
-            "details": status.get("details", {}),
-        }
+        service_info = self.get_email_service_info()
+        return self._build_generic_service_status(
+            status="operational",
+            is_available=True,
+            credits_type="unlimited",
+            rate_limits={},
+            warnings=service_info.get("warnings"),
+            details=service_info.get("details"),
+        )
 
     def cancel_email(self, **kwargs: Any) -> bool:
         """SMTP has no notion of cancel."""
@@ -154,61 +148,8 @@ class SMTPProvider(BaseProvider):
     # Helpers
     # ------------------------------------------------------------------
     def _build_message(self, recipient: str) -> EmailMessage:
-        subject = str(self._get_missive_value("subject") or "Missive")
-        body_html = self._get_missive_value("body") or ""
-        body_text = self._get_missive_value("body_text") or (
-            body_html if body_html and "<" not in body_html else ""
-        )
-
-        message = EmailMessage()
-        message["Subject"] = subject
-        message["From"] = self._config.get("DEFAULT_FROM_EMAIL", "noreply@example.com")
-        message["To"] = recipient
-
-        if body_text:
-            message.set_content(body_text)
-        else:
-            message.set_content(" ")
-        if body_html and body_html != body_text:
-            message.add_alternative(body_html, subtype="html")
-
-        for attachment in self._collect_attachments():
-            content = attachment.get("content")
-            if not content:
-                continue
-            filename = attachment.get("filename") or "attachment"
-            mime = attachment.get("mime_type") or "application/octet-stream"
-            maintype, _, subtype = mime.partition("/")
-            subtype = subtype or "octet-stream"
-            message.add_attachment(
-                content,
-                maintype=maintype,
-                subtype=subtype,
-                filename=filename,
-            )
-        return message
-
-    def _collect_attachments(self) -> List[Dict[str, Any]]:
-        attachments: List[Dict[str, Any]] = []
-        source = self._get_missive_value("attachments") or getattr(
-            self.missive, "attachments", None
-        )
-        if not source:
-            return attachments
-        iterable: List[Any]
-        if hasattr(source, "all"):
-            iterable = list(source.all())  # type: ignore[misc]
-        elif isinstance(source, list):
-            iterable = source
-        else:
-            iterable = list(source)
-        for attachment in iterable:
-            try:
-                payload = self.add_attachment_email(attachment)
-                attachments.append(payload)
-            except Exception:
-                continue
-        return attachments
+        from_email = self._config.get("DEFAULT_FROM_EMAIL", "noreply@example.com")
+        return build_email_message(self, recipient, from_email=from_email)
 
     @contextmanager
     def _smtp_connection(self):
