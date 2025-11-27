@@ -85,7 +85,9 @@ class BasePostalMixin:
 
     def _build_service_info_payload(self, service: str) -> Dict[str, Any]:
         """Construct generic service info payload from service-specific config."""
-        archiving_duration = self._get_postal_service_value(service, "archiving_duration")
+        archiving_duration = self._get_postal_service_value(
+            service, "archiving_duration"
+        )
         envelope_limits = self._get_postal_service_value(service, "envelope_limits")
         color_available = self._get_postal_service_value(
             service, "color_printing_available"
@@ -110,9 +112,7 @@ class BasePostalMixin:
                 "allowed_attachment_mime_types": mime_types,
                 "allowed_page_formats": page_formats,
             },
-            "warnings": [
-                "service info not overridden for %s" % service
-            ],
+            "warnings": ["service info not overridden for %s" % service],
             "options": [],
             "details": {
                 "color_printing_available": color_available,
@@ -359,7 +359,11 @@ class BasePostalMixin:
                 )
 
             page_format = getattr(attachment, "page_format", None)
-            if page_format and allowed_formats and page_format.upper() not in allowed_formats:
+            if (
+                page_format
+                and allowed_formats
+                and page_format.upper() not in allowed_formats
+            ):
                 raise ValueError(
                     f"{service} attachment {idx + 1}: Page format '{page_format}' not allowed."
                 )
@@ -409,9 +413,7 @@ class BasePostalMixin:
         """Prepare attachments for signature-required postal delivery."""
         return self._prepare_attachments_for_service(attachments, "postal_signature")
 
-    def prepare_lre_attachments(
-        self, attachments: List[Any]
-    ) -> List[Dict[str, Any]]:
+    def prepare_lre_attachments(self, attachments: List[Any]) -> List[Dict[str, Any]]:
         """Prepare attachments for LRE delivery."""
         return self._prepare_attachments_for_service(attachments, "lre")
 
@@ -421,9 +423,7 @@ class BasePostalMixin:
         """Prepare attachments for qualified LRE delivery."""
         return self._prepare_attachments_for_service(attachments, "lre_qualified")
 
-    def prepare_ere_attachments(
-        self, attachments: List[Any]
-    ) -> List[Dict[str, Any]]:
+    def prepare_ere_attachments(self, attachments: List[Any]) -> List[Dict[str, Any]]:
         """Prepare attachments for ERE delivery."""
         return self._prepare_attachments_for_service(attachments, "ere")
 

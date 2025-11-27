@@ -20,7 +20,13 @@ class LaPosteProvider(BaseProvider):
 
     name = "La Poste"
     display_name = "La Poste"
-    supported_types = ["POSTAL", "POSTAL_REGISTERED", "POSTAL_SIGNATURE", "EMAIL", "LRE"]
+    supported_types = [
+        "POSTAL",
+        "POSTAL_REGISTERED",
+        "POSTAL_SIGNATURE",
+        "EMAIL",
+        "LRE",
+    ]
 
     _POSTAL_MIME_TYPES = [
         "application/pdf",

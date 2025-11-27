@@ -7,16 +7,31 @@ import os
 import re
 from functools import cmp_to_key
 from pathlib import Path
-from typing import (Any, Callable, Dict, Iterable, List, Mapping, Optional,
-                    Sequence, Tuple, Type, cast)
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    cast,
+)
 
 try:
     from .address_backends import BaseAddressBackend
 except ImportError:
     BaseAddressBackend = None  # type: ignore[assignment, misc]
 
-from .providers import (BaseProviderCommon, ProviderImportError,
-                        get_provider_name_from_path, load_provider_class)
+from .providers import (
+    BaseProviderCommon,
+    ProviderImportError,
+    get_provider_name_from_path,
+    load_provider_class,
+)
 
 ErrorHandler = Callable[[str, Exception], None]
 _ProvidersConfig = Sequence[str] | Mapping[str, Mapping[str, Any]]
@@ -25,9 +40,7 @@ _ProvidersConfig = Sequence[str] | Mapping[str, Mapping[str, Any]]
 _COUNTRY_PHONE_CODES: Dict[str, List[str]] = {}
 
 try:
-    _DEFAULT_MIN_CONFIDENCE = float(
-        os.getenv("PYTHON_MISSIVE_MIN_ADDRESS_CONFIDENCE", "0.4")
-    )
+    _DEFAULT_MIN_CONFIDENCE = float(os.getenv("PYTHON_MISSIVE_MIN_ADDRESS_CONFIDENCE", "0.4"))
 except ValueError:
     _DEFAULT_MIN_CONFIDENCE = 0.4
 
@@ -233,9 +246,7 @@ def _group_providers_by_type(
     for provider_path, provider_class in _iter_provider_classes(
         providers_config, on_error=on_error
     ):
-        identifier = (
-            provider_path if use_paths else get_provider_name_from_path(provider_path)
-        )
+        identifier = provider_path if use_paths else get_provider_name_from_path(provider_path)
         for missive_type in provider_class.supported_types:
             providers_by_type.setdefault(missive_type, [])
             if identifier not in providers_by_type[missive_type]:
@@ -250,9 +261,7 @@ def get_providers_from_config(
     on_error: ErrorHandler | None = None,
 ) -> Dict[str, List[str]]:
     """Return providers grouped by missive type using short provider names."""
-    return _group_providers_by_type(
-        providers_config, use_paths=False, on_error=on_error
-    )
+    return _group_providers_by_type(providers_config, use_paths=False, on_error=on_error)
 
 
 def get_provider_paths_from_config(
@@ -342,15 +351,11 @@ def _build_provider_entries(
     """Build list of provider entries for sorting."""
     entries: List[Tuple[str, str, Any, Mapping[str, Any]]] = []
 
-    for provider_path, provider_class in _iter_provider_classes(
-        provider_paths, on_error=on_error
-    ):
+    for provider_path, provider_class in _iter_provider_classes(provider_paths, on_error=on_error):
         if target_type not in getattr(provider_class, "supported_types", []):
             continue
 
-        identifier = (
-            provider_path if use_paths else get_provider_name_from_path(provider_path)
-        )
+        identifier = provider_path if use_paths else get_provider_name_from_path(provider_path)
         if identifier not in base_index:
             continue
 
@@ -401,9 +406,7 @@ def get_providers_for_type(
     config_fields_attr = _derive_config_fields_attr(target_type)
 
     # Get valid ordering fields from *_config_fields
-    valid_order_fields = _get_valid_order_fields(
-        provider_paths, target_type, config_fields_attr
-    )
+    valid_order_fields = _get_valid_order_fields(provider_paths, target_type, config_fields_attr)
 
     # Parse and validate ordering fields
     order_specs = _parse_ordering_fields(ordering, valid_order_fields)
@@ -422,9 +425,7 @@ def get_providers_for_type(
         provider_paths, target_type, base_index, combined_metadata, use_paths, on_error
     )
 
-    def _extract_value(
-        metadata: Mapping[str, Any], field: str, provider_class: Any
-    ) -> Any:
+    def _extract_value(metadata: Mapping[str, Any], field: str, provider_class: Any) -> Any:
         """Extract value from metadata or provider class attribute.
 
         Fields are already validated to be in *_config_fields and safe to access.
@@ -494,6 +495,49 @@ def _load_address_backend_class(backend_path: str) -> Type[BaseAddressBackend]:
     return cast(Type[BaseAddressBackend], backend_class)
 
 
+def _filter_backend_configs_by_name(
+    backends_config: Sequence[Dict[str, Any]], backend_names: str | List[str]
+) -> List[Dict[str, Any]]:
+    """Filter backend configs to only include those matching the backend name(s).
+
+    Args:
+        backends_config: List of backend configurations.
+        backend_names: Name(s) of the backend(s) to filter (e.g., "nominatim",
+            ["nominatim", "google_maps"]).
+
+    Returns:
+        List containing only the matching backend configs, or empty list if none found.
+    """
+    # Normalize to list
+    if isinstance(backend_names, str):
+        backend_names_list = [backend_names]
+    else:
+        backend_names_list = backend_names
+
+    # Normalize names to lowercase for comparison
+    backend_names_lower = [name.lower().strip() for name in backend_names_list if name]
+    if not backend_names_lower:
+        return []
+
+    filtered_configs: List[Dict[str, Any]] = []
+
+    for backend_config in backends_config:
+        try:
+            backend_class = _load_address_backend_class(backend_config["class"])
+            backend_name = getattr(backend_class, "name", "").lower()
+            # Check if the backend class name matches any of the requested names
+            if backend_name in backend_names_lower:
+                filtered_configs.append(backend_config)
+                # If we've found all requested backends, we can stop early
+                if len(filtered_configs) >= len(backend_names_lower):
+                    break
+        except (ImportError, AttributeError, ValueError):
+            # Skip invalid backends
+            continue
+
+    return filtered_configs
+
+
 def get_address_backends_from_config(
     backends_config: Sequence[Dict[str, Any]] | None = None,
 ) -> List[BaseAddressBackend]:
@@ -543,8 +587,7 @@ def get_address_backends_from_config(
             if required_keys:
                 # For backends with required keys, check if ALL are configured and non-empty
                 has_config = all(
-                    config_status.get(key) == "present" and config.get(key)
-                    for key in required_keys
+                    config_status.get(key) == "present" and config.get(key) for key in required_keys
                 )
                 if not has_config:
                     # Skip if required config is missing or empty
@@ -642,7 +685,7 @@ def _mask_value(value: Any) -> Optional[str]:
     return f"{value_str[:3]}…{value_str[-2:]}"
 
 
-def _build_backend_diagnostic(
+def _build_backend_diagnostic(  # noqa: C901
     backend_config: Dict[str, Any],
     working_instances: Dict[str, BaseAddressBackend],
     selected_backend: Optional[str],
@@ -667,15 +710,40 @@ def _build_backend_diagnostic(
 
     try:
         backend_class = _load_address_backend_class(class_path)
-        backend_instance = working_instances.get(class_name) or backend_class(
-            config=config
-        )
+
+        # Extract class-level info first (before instantiation, in case it fails)
+        class_backend_name = getattr(backend_class, "name", None)
+        class_display_name = getattr(backend_class, "display_name", None)
+        class_documentation_url = getattr(backend_class, "documentation_url", None)
+        class_site_url = getattr(backend_class, "site_url", None)
+        class_required_packages = getattr(backend_class, "required_packages", [])
+        class_config_keys = getattr(backend_class, "config_keys", [])
+
+        class_label = None
+        if class_display_name:
+            class_label = class_display_name
+        elif class_backend_name:
+            class_label = class_backend_name.replace("_", " ").title()
+
+        # Update with class-level info as fallback
+        if class_backend_name and not data.get("backend_name"):
+            data["backend_name"] = class_backend_name
+        if class_label and not data.get("backend_display_name"):
+            data["backend_display_name"] = class_label
+        if class_documentation_url and not data.get("documentation_url"):
+            data["documentation_url"] = class_documentation_url
+        if class_site_url and not data.get("site_url"):
+            data["site_url"] = class_site_url
+        if class_required_packages and not data.get("required_packages"):
+            data["required_packages"] = class_required_packages
+        if class_config_keys and not data.get("required_config_keys"):
+            data["required_config_keys"] = class_config_keys
+
+        backend_instance = working_instances.get(class_name) or backend_class(config=config)
         check = backend_instance.check_package_and_config()
         packages = check.get("packages", {})
         config_status = check.get("config", {})
-        missing_packages = [
-            pkg for pkg, status in packages.items() if status != "installed"
-        ]
+        missing_packages = [pkg for pkg, status in packages.items() if status != "installed"]
         missing_config = [
             key
             for key in backend_instance.config_keys
@@ -697,7 +765,9 @@ def _build_backend_diagnostic(
                 "status": status,
                 "backend_name": getattr(backend_instance, "name", class_name),
                 "backend_display_name": getattr(
-                    backend_instance, "label", getattr(backend_instance, "name", class_name)
+                    backend_instance,
+                    "label",
+                    getattr(backend_instance, "name", class_name),
                 ),
                 "documentation_url": backend_instance.documentation_url,
                 "site_url": backend_instance.site_url,
@@ -715,7 +785,98 @@ def _build_backend_diagnostic(
             }
         )
     except Exception as exc:
-        data["error"] = str(exc)
+        error_msg = str(exc)
+        data["error"] = error_msg
+
+        # Even if instantiation failed, try to get info from the class itself
+        try:
+            backend_class = _load_address_backend_class(class_path)
+
+            # Extract all class-level attributes at once
+            if not data.get("backend_name"):
+                data["backend_name"] = getattr(backend_class, "name", None)
+            if not data.get("backend_display_name"):
+                class_display_name = getattr(backend_class, "display_name", None)
+                class_backend_name = data.get("backend_name") or getattr(
+                    backend_class, "name", None
+                )
+                if class_display_name:
+                    data["backend_display_name"] = class_display_name
+                elif class_backend_name:
+                    data["backend_display_name"] = class_backend_name.replace("_", " ").title()
+
+            # Extract other class-level attributes even if instantiation failed
+            if not data.get("documentation_url"):
+                data["documentation_url"] = getattr(backend_class, "documentation_url", None)
+            if not data.get("site_url"):
+                data["site_url"] = getattr(backend_class, "site_url", None)
+            if not data.get("required_packages"):
+                data["required_packages"] = getattr(backend_class, "required_packages", [])
+            if not data.get("required_config_keys"):
+                data["required_config_keys"] = getattr(backend_class, "config_keys", [])
+
+            # If the error is about missing config, try to determine the correct status
+            # Check if error mentions required config or API key
+            error_lower = error_msg.lower()
+            is_config_error = any(
+                keyword in error_lower
+                for keyword in ["required", "missing", "api key", "config", "not provided"]
+            )
+
+            if is_config_error:
+                # Try to check packages and config separately
+                try:
+                    # Create a temporary instance with empty config to check packages
+                    # Some backends might allow this, others might not
+                    from importlib import import_module
+
+                    # Check packages
+                    required_packages = getattr(backend_class, "required_packages", [])
+                    packages = {}
+                    missing_packages = []
+
+                    for pkg in required_packages:
+                        try:
+                            import_module(pkg)
+                            packages[pkg] = "installed"
+                        except ImportError:
+                            packages[pkg] = "missing"
+                            missing_packages.append(pkg)
+
+                    # Check config
+                    config_keys = getattr(backend_class, "config_keys", [])
+                    config_status = {}
+                    missing_config = []
+
+                    for key in config_keys:
+                        if config.get(key):
+                            config_status[key] = "present"
+                        else:
+                            config_status[key] = "missing"
+                            missing_config.append(key)
+
+                    # Determine status based on what's missing
+                    if missing_packages:
+                        data["status"] = "missing_packages"
+                    elif missing_config:
+                        data["status"] = "missing_config"
+                    else:
+                        data["status"] = "error"
+
+                    # Update packages and config info
+                    data["packages"] = packages
+                    data["config"] = {
+                        key: {
+                            "present": config_status.get(key) == "present",
+                            "value_preview": _mask_value(config.get(key)),
+                        }
+                        for key in config_keys
+                    }
+                except Exception:
+                    # If we can't determine status, keep it as "error"
+                    pass
+        except Exception:
+            pass  # If class loading also fails, keep None values
 
     return data
 
@@ -766,18 +927,54 @@ def describe_address_backends(
     )
 
     # Skip API test if requested (for faster queryset construction)
-    if skip_api_test:
-        sample_result = {"error": "API test skipped", "backend_used": None}
-        selected_backend = None
-    else:
-        sample_result = get_address_from_backends(
-            backends_config,
-            operation=normalized_operation,
-            min_confidence=None,
-            **resolved_address_kwargs,
-            **extra_kwargs_for_call,
-        )
-        selected_backend = sample_result.get("backend_used")
+    sample_result: Dict[str, Any] = {"error": "API test skipped", "backend_used": None}
+    selected_backend: Optional[str] = None
+
+    if not skip_api_test:
+        backends = get_address_backends_from_config(backends_config)
+
+        if normalized_operation == "reverse_geocode":
+            # Handle reverse_geocode separately
+            lat = extra_kwargs_for_call.get("latitude")
+            lon = extra_kwargs_for_call.get("longitude")
+            if lat is not None and lon is not None:
+                for backend in backends:
+                    try:
+                        result = backend.reverse_geocode(lat, lon, **extra_kwargs_for_call)
+                        if not result.get("error"):
+                            result["backend_used"] = backend.name
+                            sample_result = result
+                            selected_backend = backend.name
+                            break
+                    except Exception:
+                        continue
+            if not sample_result:
+                sample_result = {
+                    "error": "Reverse geocode failed",
+                    "backend_used": None,
+                }
+        else:
+            # Use search_addresses for validate/geocode
+            address_parts = [
+                resolved_address_kwargs.get("address_line1"),
+                resolved_address_kwargs.get("postal_code"),
+                resolved_address_kwargs.get("city"),
+            ]
+            test_query = ", ".join(filter(None, address_parts)) or "test address"
+            search_result = search_addresses(
+                backends_config=backends_config,
+                query=test_query,
+                country=resolved_address_kwargs.get("country"),
+                min_confidence=None,
+                limit=1,
+            )
+            results = search_result.get("results", [])
+            if results:
+                sample_result = results[0]
+                sample_result["backend_used"] = search_result.get("backend_used")
+            else:
+                sample_result = search_result
+            selected_backend = sample_result.get("backend_used")
 
     working_instances_list = get_address_backends_from_config(backends_config)
     working_instances = {
@@ -839,9 +1036,7 @@ def get_provider_by_attribute(
     provider_paths, _ = _split_providers_config(providers_config)
     normalized_value = value.strip().lower()
 
-    for provider_path, provider_class in _iter_provider_classes(
-        provider_paths, on_error=on_error
-    ):
+    for provider_path, provider_class in _iter_provider_classes(provider_paths, on_error=on_error):
         attr_value = getattr(provider_class, attribute, None)
         if attr_value is None:
             continue
@@ -914,152 +1109,296 @@ def get_address_backend_by_attribute(
     return None
 
 
-def get_address_from_backends(
+def _has_critical_error(errors: List[str]) -> bool:
+    """Check if errors list contains critical errors."""
+    if not errors:
+        return False
+    for error in errors:
+        error_lower = str(error).lower()
+        if (
+            "not configured" in error_lower
+            or "not installed" in error_lower
+            or ("error" in error_lower and "no address found" not in error_lower)
+        ):
+            return True
+    return False
+
+
+def _try_validate_backend(
+    backend: Any, address_kwargs: Dict[str, Any], threshold: float
+) -> Optional[Dict[str, Any]]:
+    """Try validate_address on a backend, return result if successful."""
+    try:
+        validate_result: Dict[str, Any] = backend.validate_address(**address_kwargs)
+        errors = validate_result.get("errors", [])
+
+        if _has_critical_error(errors):
+            return None
+
+        suggestions = validate_result.get("suggestions") or []
+        filtered_suggestions = [
+            s for s in suggestions if _passes_min_confidence(s.get("confidence"), threshold)
+        ]
+        validate_result["suggestions"] = filtered_suggestions
+
+        if filtered_suggestions or validate_result.get("normalized_address"):
+            validate_result["backend_used"] = backend.name
+            return validate_result
+    except Exception:
+        pass
+    return None
+
+
+def _try_geocode_backend(
+    backend: Any, address_kwargs: Dict[str, Any], threshold: float
+) -> Optional[Dict[str, Any]]:
+    """Try geocode on a backend, return result if successful."""
+    try:
+        geocode_result: Dict[str, Any] = backend.geocode(**address_kwargs)
+        errors = geocode_result.get("errors", [])
+
+        if _has_critical_error(errors):
+            return None
+
+        if geocode_result.get("normalized_address") or geocode_result.get("latitude"):
+            confidence_ok = _passes_min_confidence(geocode_result.get("confidence"), threshold)
+            if confidence_ok or geocode_result.get("confidence") is None:
+                geocode_result["backend_used"] = backend.name
+                return geocode_result
+    except Exception:
+        pass
+    return None
+
+
+def _build_normalized_result(
+    normalized: Dict[str, Any], result: Dict[str, Any], query: str
+) -> Dict[str, Any]:
+    """Build a normalized result dictionary from backend response."""
+    normalized_result = dict(normalized)
+    normalized_result["formatted_address"] = (
+        normalized_result.get("formatted_address") or result.get("formatted_address") or query
+    )
+    normalized_result["confidence"] = (
+        result.get("confidence") or normalized_result.get("confidence") or 0.0
+    )
+    normalized_result["backend_used"] = result.get("backend_used")
+    normalized_result["address_reference"] = normalized_result.get(
+        "address_reference"
+    ) or result.get("address_reference")
+    return normalized_result
+
+
+def _parse_address_query(query: str) -> Dict[str, Optional[str]]:
+    """Parse an address search string to extract components.
+
+    Tries to extract postal_code (5 digits) and city from the query string.
+    This helps improve search results by providing structured hints to backends.
+
+    Args:
+        query: Address search string (e.g., "35 rue jean jaures 60870 villers")
+
+    Returns:
+        Dictionary with parsed components:
+        - address_line1: Street address part
+        - postal_code: Extracted postal code (5 digits)
+        - city: City name after postal code
+    """
+    import re
+
+    query = query.strip()
+    if not query:
+        return {"address_line1": query, "postal_code": None, "city": None}
+
+    # Try to extract postal code (5 digits pattern, works for FR, US, etc.)
+    postal_code_pattern = r"\b(\d{5})\b"
+    postal_match = re.search(postal_code_pattern, query)
+
+    postal_code = None
+    city = None
+    address_line1 = query
+
+    if postal_match:
+        postal_code = postal_match.group(1)
+        postal_pos = postal_match.start()
+
+        parts = query.split(postal_code)
+        if len(parts) >= 2:
+            address_line1 = parts[0].strip()
+            city_part = parts[1].strip()
+            if city_part:
+                city = city_part
+        else:
+            address_line1 = query[:postal_pos].strip()
+
+    return {
+        "address_line1": address_line1,
+        "postal_code": postal_code,
+        "city": city,
+    }
+
+
+def search_addresses(
     backends_config: Sequence[Dict[str, Any]] | None = None,
-    operation: str = "validate",
-    address_line1: Optional[str] = None,
-    address_line2: Optional[str] = None,
-    address_line3: Optional[str] = None,
-    city: Optional[str] = None,
-    postal_code: Optional[str] = None,
-    state: Optional[str] = None,
+    query: str = "",
     country: Optional[str] = None,
     min_confidence: Optional[float] = None,
+    limit: int = 10,
+    backend: Optional[str | List[str]] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """Get address information by trying backends in order until one succeeds.
+    """Search for addresses using a simple query string.
 
-    Tries each configured backend in order until one successfully processes
-    the address request. Falls back to the next backend if one fails.
+    This is a simplified interface that accepts a single search string and returns
+    the closest matching addresses sorted by confidence. It's designed for user
+    input scenarios where addresses are entered as free text.
 
     Args:
         backends_config: List of backend configurations. If None, returns error.
-        operation: Operation to perform: "validate", "geocode", or "reverse_geocode".
-        address_line1: Street number and name.
-        address_line2: Building, apartment, floor (optional).
-        address_line3: Additional address info (optional).
-        city: City name.
-        postal_code: Postal/ZIP code.
-        state: State/region/province.
-        country: ISO country code (e.g., "FR", "US", "GB").
-        min_confidence: Optional minimum confidence (0-1) required for suggestions
-            or normalized addresses. Defaults to
+        query: Address search string (e.g., "35 rue jean jaures 60870 villers").
+        country: Optional ISO country code (e.g., "FR", "US") to filter results.
+        min_confidence: Optional minimum confidence (0-1) for results. Defaults to
             ``PYTHON_MISSIVE_MIN_ADDRESS_CONFIDENCE`` env var or 0.4.
-        **kwargs: Additional arguments (e.g., latitude, longitude for reverse_geocode).
+        limit: Maximum number of results to return (default: 10).
+        backend: Optional backend name(s) to use exclusively. Can be:
+            - A single backend name (e.g., "nominatim")
+            - A list of backend names (e.g., ["nominatim", "google_maps"])
+            - None to try all configured backends in sequence.
+            Case-insensitive.
+        **kwargs: Additional options passed to backends.
 
     Returns:
-        Dictionary with operation results from the first successful backend,
-        or error information if all backends fail.
+        Dictionary with search results:
+        - results (list): List of matching addresses, sorted by confidence (highest first).
+            Each result contains:
+            - formatted_address (str): Full formatted address
+            - address_line1, address_line2, city, postal_code, etc.
+            - latitude, longitude (float, optional): Coordinates
+            - confidence (float): Confidence score (0.0-1.0)
+            - address_reference (str): Reference ID for reverse lookup
+        - total (int): Total number of results found
+        - backend_used (str): Name of the backend that provided results
+        - error (str, optional): Error message if search failed
+        - errors (list, optional): List of error messages
 
     Example:
-        >>> config = [{"class": "...", "config": {}}]
-        >>> result = get_address_from_backends(
-        ...     config,
-        ...     operation="validate",
-        ...     address_line1="123 Main St",
-        ...     city="Paris",
-        ...     country="FR"
-        ... )
-        >>> result.get("is_valid")
+        >>> config = [{"class": "python_missive.address_backends.nominatim.NominatimAddressBackend", "config": {}}]
+        >>> result = search_addresses(config, "35 rue jean jaures 60870 villers")
+        >>> len(result.get("results", []))
+        3
+        >>> result["results"][0]["confidence"] >= result["results"][1]["confidence"]
         True
+        >>> # Force a specific backend
+        >>> result = search_addresses(config, "35 rue jean jaures 60870 villers", backend="nominatim")
+        >>> # Or use multiple backends
+        >>> result = search_addresses(config, "35 rue jean jaures 60870 villers", backend=["nominatim", "google_maps"])
     """
+    if not query or not isinstance(query, str):
+        return {
+            "results": [],
+            "total": 0,
+            "error": "Empty or invalid query",
+            "errors": ["Query string is required"],
+        }
+
+    # Pour la recherche, on utilise toujours la requête brute sans reconstruction
+    # Les backends sont conçus pour gérer les requêtes en langage naturel
+    address_kwargs = {
+        "query": query,  # Passer la requête brute directement
+        "country": country,
+    }
+
+    # Get backends
     if not backends_config:
         return {
+            "results": [],
+            "total": 0,
             "error": "No backends configuration provided",
             "errors": ["No address backends configured"],
         }
 
-    backends = get_address_backends_from_config(backends_config)
+    # Filter configs by backend name(s) if specified, so we only load those backends
+    filtered_configs = backends_config
+    if backend:
+        filtered_configs = _filter_backend_configs_by_name(backends_config, backend)
+        if not filtered_configs:
+            # Try to get available backend names for error message
+            try:
+                temp_backends = get_address_backends_from_config(backends_config)
+                available_backends = ", ".join(
+                    sorted(set(getattr(b, "name", "unknown") for b in temp_backends))
+                )
+            except Exception:
+                available_backends = "unknown"
+            backend_display = (
+                backend if isinstance(backend, str) else ", ".join(str(b) for b in backend)
+            )
+            return {
+                "results": [],
+                "total": 0,
+                "error": f"Backend(s) '{backend_display}' not found",
+                "errors": [
+                    f"Backend(s) '{backend_display}' is not available. Available backends: {available_backends}"
+                ],
+            }
+
+    # Now load only the filtered backends (will be just the specified ones if backend was specified)
+    backends = get_address_backends_from_config(filtered_configs)
 
     if not backends:
         return {
+            "results": [],
+            "total": 0,
             "error": "No working backends found",
             "errors": ["No address backends are properly configured"],
         }
 
-    address_kwargs = {
-        "address_line1": address_line1,
-        "address_line2": address_line2,
-        "address_line3": address_line3,
-        "city": city,
-        "postal_code": postal_code,
-        "state": state,
-        "country": country,
-    }
-
     threshold = _resolve_min_confidence(min_confidence)
+    result: Dict[str, Any] = {}
 
-    for backend in backends:
-        try:
-            if operation == "validate":
-                result = backend.validate_address(**address_kwargs)
-            elif operation == "geocode":
-                result = backend.geocode(**address_kwargs)
-            elif operation == "reverse_geocode":
-                latitude = kwargs.get("latitude")
-                longitude = kwargs.get("longitude")
-                if latitude is None or longitude is None:
-                    continue
-                result = backend.reverse_geocode(latitude, longitude, **kwargs)
-            else:
-                result = {"error": f"Unknown operation: {operation}"}
+    # Use validate operation only (returns normalized address with lat/lon and suggestions)
+    for backend_instance in backends:
+        validate_result = _try_validate_backend(backend_instance, address_kwargs, threshold)
+        if validate_result:
+            result = validate_result
+            break
 
-            # Check if result indicates a critical error
-            errors = result.get("errors", [])
-            critical_errors = [
-                e
-                for e in errors
-                if "not configured" in e.lower()
-                or "not installed" in e.lower()
-                or ("error" in e.lower() and "no address found" not in e.lower())
-            ]
+    # Collect all suggestions
+    all_results: List[Dict[str, Any]] = []
 
-            no_address_found = any(
-                "no address found" in e.lower() for e in errors if isinstance(e, str)
-            )
+    # Add normalized address as primary result if available
+    normalized = result.get("normalized_address") or {}
+    if normalized:
+        all_results.append(_build_normalized_result(normalized, result, query))
 
-            suggestions = result.get("suggestions") or []
-            filtered_suggestions = [
-                suggestion
-                for suggestion in suggestions
-                if _passes_min_confidence(suggestion.get("confidence"), threshold)
-            ]
-            result["suggestions"] = filtered_suggestions
+    # Add suggestions
+    suggestions = result.get("suggestions") or []
+    for suggestion in suggestions:
+        suggestion_copy = dict(suggestion)
+        suggestion_copy["backend_used"] = result.get("backend_used")
+        if suggestion_copy not in all_results:  # Avoid duplicates
+            all_results.append(suggestion_copy)
 
-            normalized_block = result.get("normalized_address") or {}
-            normalized_confidence_ok = _passes_min_confidence(
-                result.get("confidence"), threshold
-            )
-            has_normalized_payload = bool(
-                normalized_block
-                or result.get("formatted_address")
-                or result.get("address_line1")
-            )
+    # Sort by confidence (highest first)
+    def _get_confidence(item: Dict[str, Any]) -> float:
+        conf = _coerce_confidence(item.get("confidence"))
+        return conf if conf is not None else 0.0
 
-            if (
-                not filtered_suggestions
-                and (
-                    no_address_found
-                    or not has_normalized_payload
-                    or (
-                        result.get("confidence") is not None
-                        and not normalized_confidence_ok
-                    )
-                )
-            ):
-                continue
+    all_results.sort(key=_get_confidence, reverse=True)
 
-            # If no critical errors, return the result
-            if not critical_errors:
-                result["backend_used"] = backend.name
-                return result
+    # Apply limit
+    limited_results = all_results[:limit]
 
-        except Exception:
-            # Backend failed, try next one
-            continue
-
-    # All backends failed
-    return {
-        "error": "All backends failed",
-        "errors": ["All configured address backends failed to process the request"],
+    # Build response
+    response: Dict[str, Any] = {
+        "results": limited_results,
+        "total": len(all_results),
     }
+
+    if result.get("backend_used"):
+        response["backend_used"] = result["backend_used"]
+
+    if result.get("error"):
+        response["error"] = result["error"]
+        response["errors"] = result.get("errors", [])
+
+    return response

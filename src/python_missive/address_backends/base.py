@@ -79,6 +79,7 @@ class BaseAddressBackend:
             - suggestions (list): List of suggested addresses if validation fails.
             - warnings (list): List of warnings about the address.
             - errors (list): List of errors if validation fails.
+            - address_reference (str, optional): Reference ID for reverse lookup (e.g., place_id, osm_id).
         """
         return {
             "is_valid": False,
@@ -119,6 +120,7 @@ class BaseAddressBackend:
             - accuracy (str): Accuracy level (e.g., "ROOFTOP", "STREET", "CITY").
             - confidence (float): Confidence score (0.0-1.0).
             - formatted_address (str): Formatted address string.
+            - address_reference (str, optional): Reference ID for reverse lookup (e.g., place_id, osm_id).
         """
         return {
             "latitude": None,
@@ -149,6 +151,7 @@ class BaseAddressBackend:
             - country (str): ISO country code.
             - formatted_address (str): Formatted address string.
             - confidence (float): Confidence score (0.0-1.0).
+            - address_reference (str, optional): Reference ID for reverse lookup (e.g., place_id, osm_id).
         """
         return {
             "address_line1": None,
@@ -160,6 +163,47 @@ class BaseAddressBackend:
             "formatted_address": None,
             "confidence": 0.0,
             "errors": ["reverse_geocode() not implemented"],
+        }
+
+    def get_address_by_reference(
+        self, address_reference: str, **kwargs: Any
+    ) -> Dict[str, Any]:
+        """Retrieve an address by its reference ID.
+
+        Args:
+            address_reference: Reference ID returned by validate_address, geocode, or reverse_geocode.
+            **kwargs: Additional options (e.g., language, country bias).
+
+        Returns:
+            Dictionary with address details:
+            - address_line1 (str): Street number and name.
+            - address_line2 (str): Building, apartment, floor (optional).
+            - address_line3 (str): Additional address info (optional).
+            - city (str): City name.
+            - postal_code (str): Postal/ZIP code.
+            - state (str): State/region/province.
+            - country (str): ISO country code.
+            - formatted_address (str): Formatted address string.
+            - latitude (float, optional): Latitude coordinate.
+            - longitude (float, optional): Longitude coordinate.
+            - confidence (float): Confidence score (0.0-1.0).
+            - address_reference (str): The reference ID used for lookup.
+            - errors (list): List of errors if lookup fails.
+        """
+        return {
+            "address_line1": None,
+            "address_line2": None,
+            "address_line3": None,
+            "city": None,
+            "postal_code": None,
+            "state": None,
+            "country": None,
+            "formatted_address": None,
+            "latitude": None,
+            "longitude": None,
+            "confidence": 0.0,
+            "address_reference": address_reference,
+            "errors": ["get_address_by_reference() not implemented"],
         }
 
     def normalize_address(

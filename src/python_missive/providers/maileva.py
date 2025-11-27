@@ -299,9 +299,7 @@ class MailevaProvider(BaseProvider):
             **kwargs,
         )
 
-    def _send_electronic_registered(
-        self, service: str, *, description: str
-    ) -> bool:
+    def _send_electronic_registered(self, service: str, *, description: str) -> bool:
         """Simulate electronic registered (LRE/ERE) sending."""
         is_valid, error = self.validate()
         if not is_valid:

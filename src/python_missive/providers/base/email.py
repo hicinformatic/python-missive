@@ -95,7 +95,9 @@ class BaseEmailMixin:
 
     def _build_email_service_info(self, service: str) -> Dict[str, Any]:
         """Construct a default service information payload."""
-        archiving_duration = self._get_email_service_value(service, "archiving_duration")
+        archiving_duration = self._get_email_service_value(
+            service, "archiving_duration"
+        )
         coverage = self._get_email_service_value(service, "geographic_coverage") or [
             "*"
         ]

@@ -281,7 +281,9 @@ class BaseProviderCommon:
             return self._resolve_postal_service_variant(normalized)
 
         if normalized == "EMAIL":
-            return "email_ar" if getattr(self.missive, "is_registered", False) else "email"
+            return (
+                "email_ar" if getattr(self.missive, "is_registered", False) else "email"
+            )
 
         if normalized == "BRANDED":
             return self.name.lower()

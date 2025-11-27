@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
-
 _ADDRESS_KEYS = (
     "address_line1",
     "address_line2",
@@ -91,7 +90,12 @@ class Address:
             return cls()
 
         def _extract_line(key: str) -> str:
-            for alias in (key, key.replace("line", "_line"), f"recipient_{key}", f"sender_{key}"):
+            for alias in (
+                key,
+                key.replace("line", "_line"),
+                f"recipient_{key}",
+                f"sender_{key}",
+            ):
                 if alias in payload and payload[alias]:
                     return str(payload[alias])
             return ""
@@ -106,9 +110,13 @@ class Address:
             country=str(payload.get("country") or payload.get("country_code") or ""),
             latitude=_safe_float(payload.get("latitude")),
             longitude=_safe_float(payload.get("longitude")),
-            formatted=str(payload.get("formatted_address") or payload.get("formatted") or ""),
+            formatted=str(
+                payload.get("formatted_address") or payload.get("formatted") or ""
+            ),
             backend_used=payload.get("backend_used") or payload.get("backend"),
-            backend_reference=payload.get("backend_reference") or payload.get("reference_id"),
+            backend_reference=payload.get("backend_reference")
+            or payload.get("reference_id")
+            or payload.get("address_reference"),
             confidence=_safe_float(payload.get("confidence")),
             suggestions=tuple(payload.get("suggestions") or ()),
             warnings=tuple(payload.get("warnings") or ()),
@@ -118,6 +126,7 @@ class Address:
 
     def merge(self, other: "Address", *, prefer_other: bool = True) -> "Address":
         """Merge two addresses, optionally preferring `other` values when provided."""
+
         def _select(current: Any, new_value: Any) -> Any:
             if prefer_other and new_value not in ("", None):
                 return new_value
@@ -157,17 +166,43 @@ class Address:
     ) -> Tuple["Address", Dict[str, Any]]:
         """Call configured backends and return a normalized Address plus raw payload."""
         if not backends_config:
-            return cls.from_dict(address_kwargs), {"error": "No address backends configured"}
+            return cls.from_dict(address_kwargs), {
+                "error": "No address backends configured"
+            }
 
-        from .helpers import get_address_from_backends
+        from .helpers import search_addresses
 
-        payload = get_address_from_backends(
-            backends_config,
-            operation=operation,
+        # Build query string from address components
+        address_parts = [
+            address_kwargs.get("address_line1"),
+            address_kwargs.get("address_line2"),
+            address_kwargs.get("address_line3"),
+            address_kwargs.get("postal_code"),
+            address_kwargs.get("city"),
+            address_kwargs.get("state"),
+        ]
+        query = ", ".join(filter(None, address_parts)) or ""
+
+        # If query is empty but we have components, try a simpler query
+        if not query:
+            query = address_kwargs.get("address_line1") or ""
+
+        search_result = search_addresses(
+            backends_config=backends_config,
+            query=query,
+            country=address_kwargs.get("country"),
             min_confidence=min_confidence,
-            **address_kwargs,
+            limit=1,
         )
-        normalized_block = payload.get("normalized_address") or payload
+
+        # Get first result or use error payload
+        results = search_result.get("results", [])
+        if results:
+            payload = results[0]
+            normalized_block = payload.get("normalized_address") or payload
+        else:
+            payload = search_result
+            normalized_block = {}
         normalized = cls.from_dict(
             {
                 **address_kwargs,
@@ -178,7 +213,8 @@ class Address:
                 "errors": payload.get("errors"),
                 "suggestions": payload.get("suggestions"),
                 "backend_reference": payload.get("backend_reference")
-                or payload.get("reference_id"),
+                or payload.get("reference_id")
+                or payload.get("address_reference"),
             }
         )
         return normalized, payload
@@ -216,6 +252,8 @@ def _flatten_address_dict(payload: Mapping[str, Any]) -> Dict[str, Any]:
         flat["longitude"] = payload.get("longitude")
     if "backend_reference" in payload and payload["backend_reference"]:
         flat["backend_reference"] = payload["backend_reference"]
+    elif "address_reference" in payload and payload["address_reference"]:
+        flat["backend_reference"] = payload["address_reference"]
     return flat
 
 

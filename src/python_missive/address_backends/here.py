@@ -71,7 +71,10 @@ class HereAddressBackend(BaseAddressBackend):
         base_url = "https://geocoder.api.here.com/6.2"
         url = f"{base_url}{endpoint}"
 
-        request_params: Dict[str, Any] = {"app_id": self._app_id, "app_code": self._app_code}
+        request_params: Dict[str, Any] = {
+            "app_id": self._app_id,
+            "app_code": self._app_code,
+        }
         if params:
             request_params.update(params)
 
@@ -98,18 +101,24 @@ class HereAddressBackend(BaseAddressBackend):
         postal_code: Optional[str] = None,
         state: Optional[str] = None,
         country: Optional[str] = None,
+        query: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using HERE Geocoding API."""
-        search_text = self._build_address_string(
-            address_line1,
-            address_line2,
-            address_line3,
-            city,
-            postal_code,
-            state,
-            country,
-        )
+        # Si query est fourni, l'utiliser directement (priorité sur les composants)
+        if query:
+            search_text = query
+        else:
+            # Fallback sur les composants structurés si query n'est pas fourni
+            search_text = self._build_address_string(
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
 
         if not search_text:
             return {
@@ -193,6 +202,9 @@ class HereAddressBackend(BaseAddressBackend):
         if confidence < 0.9:
             warnings.append("Low confidence match")
 
+        location = best_match.get("Location", {})
+        location_id = location.get("LocationId")
+
         return {
             "is_valid": is_valid,
             "normalized_address": normalized,
@@ -200,6 +212,9 @@ class HereAddressBackend(BaseAddressBackend):
             "suggestions": suggestions,
             "warnings": warnings,
             "errors": [],
+            "address_reference": (
+                str(location_id) if location_id else normalized.get("address_reference")
+            ),
         }
 
     def geocode(
@@ -211,18 +226,24 @@ class HereAddressBackend(BaseAddressBackend):
         postal_code: Optional[str] = None,
         state: Optional[str] = None,
         country: Optional[str] = None,
+        query: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using HERE."""
-        search_text = self._build_address_string(
-            address_line1,
-            address_line2,
-            address_line3,
-            city,
-            postal_code,
-            state,
-            country,
-        )
+        # Si query est fourni, l'utiliser directement (priorité sur les composants)
+        if query:
+            search_text = query
+        else:
+            # Fallback sur les composants structurés si query n'est pas fourni
+            search_text = self._build_address_string(
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
 
         if not search_text:
             return {
@@ -294,6 +315,7 @@ class HereAddressBackend(BaseAddressBackend):
         relevance = match_quality.get("Relevance", 0.0) / 100.0
 
         address = location.get("Address", {})
+        location_id = location.get("LocationId")
 
         return {
             "latitude": display_position.get("Latitude"),
@@ -301,6 +323,7 @@ class HereAddressBackend(BaseAddressBackend):
             "accuracy": accuracy,
             "confidence": relevance,
             "formatted_address": address.get("Label", ""),
+            "address_reference": str(location_id) if location_id else None,
             "errors": [],
         }
 
@@ -322,6 +345,7 @@ class HereAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -337,6 +361,7 @@ class HereAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -351,6 +376,7 @@ class HereAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -368,11 +394,115 @@ class HereAddressBackend(BaseAddressBackend):
 
         location = best_result.get("Location", {})
         address = location.get("Address", {})
+        location_id = location.get("LocationId")
 
         return {
             **normalized,
             "formatted_address": address.get("Label", ""),
             "confidence": relevance,
+            "address_reference": (
+                str(location_id) if location_id else normalized.get("address_reference")
+            ),
+            "errors": [],
+        }
+
+    def get_address_by_reference(
+        self, address_reference: str, **kwargs: Any
+    ) -> Dict[str, Any]:
+        """Retrieve an address by its LocationId using HERE Geocoding API."""
+        if not address_reference:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["address_reference is required"],
+            }
+
+        params = {"locationid": address_reference}
+        if "language" in kwargs:
+            params["language"] = kwargs["language"]
+
+        result = self._make_request("/geocode.json", params)
+
+        if "error" in result:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": [result["error"]],
+            }
+
+        response = result.get("Response", {})
+        view = response.get("View", [])
+        if not view:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["No address found for this LocationId"],
+            }
+
+        results = view[0].get("Result", [])
+        if not results:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["No address found for this LocationId"],
+            }
+
+        best_result = results[0]
+        normalized = self._extract_address_from_result(best_result)
+
+        location = best_result.get("Location", {})
+        display_position = location.get("DisplayPosition", {})
+        address = location.get("Address", {})
+        match_quality = best_result.get("MatchQuality", {})
+        relevance = match_quality.get("Relevance", 0.0) / 100.0
+
+        return {
+            **normalized,
+            "formatted_address": address.get("Label", ""),
+            "latitude": display_position.get("Latitude"),
+            "longitude": display_position.get("Longitude"),
+            "confidence": relevance,
+            "address_reference": address_reference,
             "errors": [],
         }
 
@@ -394,6 +524,9 @@ class HereAddressBackend(BaseAddressBackend):
         state = address.get("State", "")
         country = address.get("Country", "").upper()
 
+        # Extract LocationId for reverse lookup
+        location_id = location.get("LocationId")
+
         return {
             "address_line1": address_line1,
             "address_line2": "",
@@ -402,4 +535,5 @@ class HereAddressBackend(BaseAddressBackend):
             "postal_code": postal_code,
             "state": state,
             "country": country,
+            "address_reference": str(location_id) if location_id else None,
         }

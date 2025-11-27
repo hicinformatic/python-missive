@@ -114,7 +114,9 @@ class BaseBrandedMixin:
             "limits": {
                 "archiving_duration_days": config["archiving_duration"],
                 "max_attachment_size_mb": config["max_attachment_size_mb"],
-                "allowed_attachment_mime_types": config["allowed_attachment_mime_types"],
+                "allowed_attachment_mime_types": config[
+                    "allowed_attachment_mime_types"
+                ],
             },
             "warnings": [f"{method_name}() method not implemented for this provider"],
             "details": {

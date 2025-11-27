@@ -121,18 +121,24 @@ class NominatimAddressBackend(BaseAddressBackend):
         postal_code: Optional[str] = None,
         state: Optional[str] = None,
         country: Optional[str] = None,
+        query: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using Nominatim."""
-        query = self._build_address_string(
-            address_line1,
-            address_line2,
-            address_line3,
-            city,
-            postal_code,
-            state,
-            country,
-        )
+        # Si query est fourni, l'utiliser directement (priorité sur les composants)
+        if query:
+            query_string = query
+        else:
+            # Fallback sur les composants structurés si query n'est pas fourni
+            query_string = self._build_address_string(
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
 
         if not query:
             return {
@@ -144,7 +150,7 @@ class NominatimAddressBackend(BaseAddressBackend):
                 "errors": ["Address query is empty"],
             }
 
-        params = {"q": query}
+        params = {"q": query_string}
         if country:
             params["countrycodes"] = country.lower()
 
@@ -173,6 +179,12 @@ class NominatimAddressBackend(BaseAddressBackend):
         best_match = result[0]
         normalized = self._extract_address_from_result(best_match)
 
+        lat = best_match.get("lat")
+        lon = best_match.get("lon")
+        if lat and lon:
+            normalized["latitude"] = float(lat)
+            normalized["longitude"] = float(lon)
+
         importance = best_match.get("importance", 0.0)
         confidence = min(importance * 2.0, 1.0)
         is_valid = confidence >= 0.5 and importance >= 0.3
@@ -181,18 +193,24 @@ class NominatimAddressBackend(BaseAddressBackend):
         if not is_valid and len(result) > 1:
             for item in result[1:5]:
                 item_importance = item.get("importance", 0.0)
-                suggestions.append(
-                    {
-                        "formatted_address": item.get("display_name", ""),
-                        "confidence": min(item_importance * 2.0, 1.0),
-                    }
-                )
+                suggestion_data = {
+                    "formatted_address": item.get("display_name", ""),
+                    "confidence": min(item_importance * 2.0, 1.0),
+                }
+                item_lat = item.get("lat")
+                item_lon = item.get("lon")
+                if item_lat and item_lon:
+                    suggestion_data["latitude"] = float(item_lat)
+                    suggestion_data["longitude"] = float(item_lon)
+                suggestions.append(suggestion_data)
 
         warnings = []
         if importance < 0.5:
             warnings.append("Low importance match")
         if confidence < 0.7:
             warnings.append("Low confidence match")
+
+        place_id = best_match.get("place_id")
 
         return {
             "is_valid": is_valid,
@@ -201,6 +219,9 @@ class NominatimAddressBackend(BaseAddressBackend):
             "suggestions": suggestions,
             "warnings": warnings,
             "errors": [],
+            "address_reference": (
+                str(place_id) if place_id else normalized.get("address_reference")
+            ),
         }
 
     def geocode(
@@ -212,20 +233,26 @@ class NominatimAddressBackend(BaseAddressBackend):
         postal_code: Optional[str] = None,
         state: Optional[str] = None,
         country: Optional[str] = None,
+        query: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using Nominatim."""
-        query = self._build_address_string(
-            address_line1,
-            address_line2,
-            address_line3,
-            city,
-            postal_code,
-            state,
-            country,
-        )
+        # Si query est fourni, l'utiliser directement (priorité sur les composants)
+        if query:
+            query_string = query
+        else:
+            # Fallback sur les composants structurés si query n'est pas fourni
+            query_string = self._build_address_string(
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
 
-        if not query:
+        if not query_string:
             return {
                 "latitude": None,
                 "longitude": None,
@@ -235,7 +262,7 @@ class NominatimAddressBackend(BaseAddressBackend):
                 "errors": ["Address query is empty"],
             }
 
-        params = {"q": query, "limit": 1}
+        params = {"q": query_string, "limit": 1}
         if country:
             params["countrycodes"] = country.lower()
 
@@ -280,12 +307,15 @@ class NominatimAddressBackend(BaseAddressBackend):
         importance = best_result.get("importance", 0.0)
         confidence = min(importance * 2.0, 1.0)
 
+        place_id = best_result.get("place_id")
+
         return {
             "latitude": float(lat) if lat else None,
             "longitude": float(lon) if lon else None,
             "accuracy": accuracy,
             "confidence": confidence,
             "formatted_address": best_result.get("display_name", ""),
+            "address_reference": str(place_id) if place_id else None,
             "errors": [],
         }
 
@@ -303,6 +333,7 @@ class NominatimAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -316,6 +347,7 @@ class NominatimAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -327,13 +359,121 @@ class NominatimAddressBackend(BaseAddressBackend):
 
         normalized = self._extract_address_from_result(result)
 
+        lat = result.get("lat")
+        lon = result.get("lon")
+        if lat and lon:
+            normalized["latitude"] = float(lat)
+            normalized["longitude"] = float(lon)
+
         importance = result.get("importance", 0.0)
         confidence = min(importance * 2.0, 1.0)
+        place_id = result.get("place_id")
 
         return {
             **normalized,
             "formatted_address": result.get("display_name", ""),
             "confidence": confidence,
+            "address_reference": (
+                str(place_id) if place_id else normalized.get("address_reference")
+            ),
+            "errors": [],
+        }
+
+    def get_address_by_reference(
+        self, address_reference: str, **kwargs: Any
+    ) -> Dict[str, Any]:
+        """Retrieve an address by its place_id using Nominatim lookup endpoint."""
+        if not address_reference:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["address_reference is required"],
+            }
+
+        try:
+            place_id = int(address_reference)
+        except (ValueError, TypeError):
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["Invalid place_id format"],
+            }
+
+        params = {"place_id": place_id, "format": "json", "addressdetails": 1}
+        if "language" in kwargs:
+            params["accept-language"] = kwargs["language"]
+
+        result = self._make_request("/lookup", params)
+
+        if "error" in result:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": [result["error"]],
+            }
+
+        if not isinstance(result, list) or not result:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["No address found for this place_id"],
+            }
+
+        address_result = result[0]
+        normalized = self._extract_address_from_result(address_result)
+
+        lat = address_result.get("lat")
+        lon = address_result.get("lon")
+        importance = address_result.get("importance", 0.0)
+        confidence = min(importance * 2.0, 1.0)
+
+        return {
+            **normalized,
+            "formatted_address": address_result.get("display_name", ""),
+            "latitude": float(lat) if lat else None,
+            "longitude": float(lon) if lon else None,
+            "confidence": confidence,
+            "address_reference": address_reference,
             "errors": [],
         }
 
@@ -365,6 +505,9 @@ class NominatimAddressBackend(BaseAddressBackend):
         )
         country = address.get("country_code", "").upper()
 
+        # Extract place_id for reverse lookup
+        place_id = result.get("place_id")
+
         return {
             "address_line1": address_line1,
             "address_line2": "",
@@ -373,4 +516,5 @@ class NominatimAddressBackend(BaseAddressBackend):
             "postal_code": postal_code,
             "state": state,
             "country": country,
+            "address_reference": str(place_id) if place_id else None,
         }

@@ -276,7 +276,12 @@ def test_provider_method() -> None:
         missive_kwargs["recipient"] = RecipientStub(
             metadata={"apn_device_token": "a" * 64}
         )
-    elif service_type.lower() in ("postal", "postal_registered", "postal_signature", "lre"):
+    elif service_type.lower() in (
+        "postal",
+        "postal_registered",
+        "postal_signature",
+        "lre",
+    ):
         missive_kwargs["recipient"] = RecipientStub(
             email="test@example.com",
             address_line1="123 Test St",

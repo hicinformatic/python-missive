@@ -48,10 +48,9 @@ class SMTPProvider(BaseProvider):
             return False, "SMTP_HOST and SMTP_PORT must be configured"
 
         if "DEFAULT_FROM_EMAIL" not in self._config:
-            sender_addr = (
-                self._get_missive_value("sender_email")
-                or self._get_missive_value("sender")
-            )
+            sender_addr = self._get_missive_value(
+                "sender_email"
+            ) or self._get_missive_value("sender")
             self._raw_config["DEFAULT_FROM_EMAIL"] = (
                 sender_addr if isinstance(sender_addr, str) else "noreply@example.com"
             )
@@ -61,10 +60,9 @@ class SMTPProvider(BaseProvider):
 
     def send_email(self, **kwargs: Any) -> bool:
         """Send an email via configured SMTP server."""
-        recipient = (
-            self._get_missive_value("get_recipient_email")
-            or self._get_missive_value("recipient_email")
-        )
+        recipient = self._get_missive_value(
+            "get_recipient_email"
+        ) or self._get_missive_value("recipient_email")
         if not recipient:
             self._update_status(
                 MissiveStatus.FAILED, error_message="Recipient email missing"

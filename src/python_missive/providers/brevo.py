@@ -37,7 +37,11 @@ class BrevoProvider(BaseProvider):
     email_price = 0.08  # transactional email unit cost (default Brevo Essentials)
     email_marketing_price = 0.05  # cost attributed to marketing sends
     email_marketing_max_attachment_size_mb = 10  # lighter assets for campaigns
-    email_marketing_allowed_attachment_mime_types = ["text/html", "image/jpeg", "image/png"]
+    email_marketing_allowed_attachment_mime_types = [
+        "text/html",
+        "image/jpeg",
+        "image/png",
+    ]
     sms_price = 0.07  # average SMS HT within Europe zone
 
     # ------------------------------------------------------------------

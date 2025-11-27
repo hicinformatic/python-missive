@@ -97,18 +97,24 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         postal_code: Optional[str] = None,
         state: Optional[str] = None,
         country: Optional[str] = None,
+        query: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Validate an address using Google Maps Geocoding API."""
-        address = self._build_address_string(
-            address_line1,
-            address_line2,
-            address_line3,
-            city,
-            postal_code,
-            state,
-            country,
-        )
+        # Si query est fourni, l'utiliser directement (priorité sur les composants)
+        if query:
+            address = query
+        else:
+            # Fallback sur les composants structurés si query n'est pas fourni
+            address = self._build_address_string(
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
 
         if not address:
             return {
@@ -192,6 +198,8 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         if confidence < 0.9:
             warnings.append("Low confidence match")
 
+        place_id = best_match.get("place_id")
+
         return {
             "is_valid": is_valid,
             "normalized_address": normalized,
@@ -199,6 +207,9 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             "suggestions": suggestions,
             "warnings": warnings,
             "errors": [],
+            "address_reference": (
+                place_id if place_id else normalized.get("address_reference")
+            ),
         }
 
     def geocode(
@@ -210,18 +221,24 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         postal_code: Optional[str] = None,
         state: Optional[str] = None,
         country: Optional[str] = None,
+        query: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Geocode an address to coordinates using Google Maps."""
-        address = self._build_address_string(
-            address_line1,
-            address_line2,
-            address_line3,
-            city,
-            postal_code,
-            state,
-            country,
-        )
+        # Si query est fourni, l'utiliser directement (priorité sur les composants)
+        if query:
+            address = query
+        else:
+            # Fallback sur les composants structurés si query n'est pas fourni
+            address = self._build_address_string(
+                address_line1,
+                address_line2,
+                address_line3,
+                city,
+                postal_code,
+                state,
+                country,
+            )
 
         if not address:
             return {
@@ -293,6 +310,7 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             "APPROXIMATE": 0.5,
         }
         confidence = confidence_map.get(location_type, 0.5)
+        place_id = best_result.get("place_id")
 
         return {
             "latitude": location.get("lat"),
@@ -300,6 +318,7 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             "accuracy": accuracy,
             "confidence": confidence,
             "formatted_address": best_result.get("formatted_address", ""),
+            "address_reference": place_id if place_id else None,
             "errors": [],
         }
 
@@ -317,6 +336,7 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -333,6 +353,7 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -347,6 +368,7 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             return {
                 "address_line1": None,
                 "address_line2": None,
+                "address_line3": None,
                 "city": None,
                 "postal_code": None,
                 "state": None,
@@ -367,11 +389,122 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             "APPROXIMATE": 0.5,
         }
         confidence = confidence_map.get(location_type, 0.5)
+        place_id = best_result.get("place_id")
 
         return {
             **normalized,
             "formatted_address": best_result.get("formatted_address", ""),
             "confidence": confidence,
+            "address_reference": (
+                place_id if place_id else normalized.get("address_reference")
+            ),
+            "errors": [],
+        }
+
+    def get_address_by_reference(
+        self, address_reference: str, **kwargs: Any
+    ) -> Dict[str, Any]:
+        """Retrieve an address by its place_id using Google Maps Places API."""
+        if not address_reference:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["address_reference is required"],
+            }
+
+        params = {"place_id": address_reference}
+        if "language" in kwargs:
+            params["language"] = kwargs["language"]
+
+        result = self._make_request("/geocode/json", params)
+
+        if "error" in result:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": [result["error"]],
+            }
+
+        if result.get("status") != "OK":
+            error_msg = result.get(
+                "error_message", result.get("status", "Unknown error")
+            )
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": [error_msg],
+            }
+
+        results = result.get("results", [])
+        if not results:
+            return {
+                "address_line1": None,
+                "address_line2": None,
+                "address_line3": None,
+                "city": None,
+                "postal_code": None,
+                "state": None,
+                "country": None,
+                "formatted_address": None,
+                "latitude": None,
+                "longitude": None,
+                "confidence": 0.0,
+                "address_reference": address_reference,
+                "errors": ["No address found for this place_id"],
+            }
+
+        best_result = results[0]
+        normalized = self._extract_address_from_result(best_result)
+
+        geometry = best_result.get("geometry", {})
+        location = geometry.get("location", {})
+        location_type = geometry.get("location_type", "")
+
+        confidence_map = {
+            "ROOFTOP": 1.0,
+            "RANGE_INTERPOLATED": 0.9,
+            "GEOMETRIC_CENTER": 0.7,
+            "APPROXIMATE": 0.5,
+        }
+        confidence = confidence_map.get(location_type, 0.5)
+
+        return {
+            **normalized,
+            "formatted_address": best_result.get("formatted_address", ""),
+            "latitude": location.get("lat"),
+            "longitude": location.get("lng"),
+            "confidence": confidence,
+            "address_reference": address_reference,
             "errors": [],
         }
 
@@ -413,6 +546,9 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
         elif route:
             address_line1 = route
 
+        # Extract place_id for reverse lookup
+        place_id = result.get("place_id")
+
         return {
             "address_line1": address_line1,
             "address_line2": address_line2,
@@ -421,4 +557,5 @@ class GoogleMapsAddressBackend(BaseAddressBackend):
             "postal_code": postal_code,
             "state": state,
             "country": country,
+            "address_reference": place_id if place_id else None,
         }
