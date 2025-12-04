@@ -28,7 +28,7 @@ class MissiveSender:
 
         Args:
             providers_config: Either:
-                - List of provider import paths (e.g., ["python_missive.providers.brevo.BrevoProvider"])
+                - List of provider import paths (e.g., ["pymissive.providers.brevo.BrevoProvider"])
                 - Dict mapping provider paths to their configs (e.g., {"path": {"API_KEY": "value"}})
             default_config: Default configuration dict merged with provider-specific configs
             sandbox: If True, forces sandbox mode for all providers (no real sends)

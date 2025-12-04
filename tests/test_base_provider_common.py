@@ -7,8 +7,8 @@ from typing import Any, Dict, List
 
 import pytest
 
-from python_missive.providers.base import BaseProviderCommon
-from python_missive.status import MissiveStatus
+from pymissive.providers.base import BaseProviderCommon
+from pymissive.status import MissiveStatus
 
 
 class DummyMissive:

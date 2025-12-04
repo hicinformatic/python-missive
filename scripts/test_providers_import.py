@@ -17,8 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from python_missive.helpers import _iter_provider_classes
-from python_missive.providers import get_provider_name_from_path, ProviderImportError
+from pymissive.helpers import _iter_provider_classes
+from pymissive.providers import get_provider_name_from_path, ProviderImportError
 
 
 class MockMissive:

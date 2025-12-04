@@ -6,10 +6,10 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from python_missive.providers import (BaseProvider, ProviderImportError,
+from pymissive.providers import (BaseProvider, ProviderImportError,
                                       get_provider_name_from_path,
                                       load_provider_class)
-from python_missive.status import MissiveStatus
+from pymissive.status import MissiveStatus
 
 
 def _load_test_providers():

@@ -8,11 +8,11 @@ from typing import Any, Dict, List
 
 import pytest
 
-from python_missive.helpers import (format_phone_international,
+from pymissive.helpers import (format_phone_international,
                                     get_provider_paths_from_config,
                                     get_providers_for_type,
                                     get_providers_from_config, load_providers)
-from python_missive.providers import (BaseProviderCommon, ProviderImportError,
+from pymissive.providers import (BaseProviderCommon, ProviderImportError,
                                       build_registry,
                                       get_provider_name_from_path,
                                       load_provider_class)
@@ -72,7 +72,7 @@ def test_load_provider_class_invalid_class() -> None:
 
 def test_get_provider_name_from_path_variants() -> None:
     assert (
-        get_provider_name_from_path("python_missive.providers.twilio.TwilioProvider")
+        get_provider_name_from_path("pymissive.providers.twilio.TwilioProvider")
         == "twilio"
     )
     assert get_provider_name_from_path("CustomProvider") == "customprovider"

@@ -6,14 +6,17 @@ from typing import Dict
 
 import pytest
 
-from python_missive.address import Address
-from python_missive.address_backends import (BaseAddressBackend,
+try:
+    from geoaddress import Address, BaseAddressBackend
+except ImportError:
+    from pymissive.address import Address
+    from pymissive.address_backends import (BaseAddressBackend,
                                              GoogleMapsAddressBackend,
                                              HereAddressBackend,
                                              MapboxAddressBackend,
                                              NominatimAddressBackend,
                                              PhotonAddressBackend)
-from python_missive.helpers import (describe_address_backends,
+from pymissive.helpers import (describe_address_backends,
                                     get_address_backends_from_config)
 from tests.test_config import (MISSIVE_CONFIG_ADDRESS_BACKENDS,
                                get_working_address_backend)
@@ -114,7 +117,7 @@ class TestAddressBackendDisplayName:
         payload = describe_address_backends(
             [
                 {
-                    "class": "python_missive.address_backends.nominatim.NominatimAddressBackend",
+                    "class": "pymissive.address_backends.nominatim.NominatimAddressBackend",
                     "config": {},
                 }
             ],

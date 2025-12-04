@@ -70,7 +70,7 @@ def send_missive(
         recipient_phone: Recipient phone number (for SMS, VOICE_CALL)
         recipient: Complex recipient object with metadata (for PUSH_NOTIFICATION, etc.)
         providers_config: Either:
-            - List of provider import paths: ["python_missive.providers.brevo.BrevoProvider"]
+            - List of provider import paths: ["pymissive.providers.brevo.BrevoProvider"]
             - Dict mapping paths to configs: {"path": {"API_KEY": "value"}}
         config: Default configuration dict merged with provider-specific configs
         sandbox: If True, forces sandbox mode for all providers (no real sends)

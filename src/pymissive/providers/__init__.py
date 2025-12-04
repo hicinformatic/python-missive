@@ -68,7 +68,7 @@ def get_provider_name_from_path(provider_path: str) -> str:
         return provider_path.lower()
 
     parts = provider_path.split(".")
-    if len(parts) >= 3 and parts[0] == "python_missive" and parts[1] == "providers":
+    if len(parts) >= 3 and parts[0] == "pymissive" and parts[1] == "providers":
         return parts[2].lower()
 
     class_name = parts[-1]

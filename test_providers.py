@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable
 
-from python_missive.providers import (
+from pymissive.providers import (
     ProviderImportError,
     get_provider_name_from_path,
     load_provider_class,

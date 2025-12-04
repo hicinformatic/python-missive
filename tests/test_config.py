@@ -1,7 +1,7 @@
 """Test configuration for provider discovery.
 
 This configuration mirrors the structure from django-missive/tests/settings.py
-but uses python_missive.providers.* paths instead of missive.providers.*
+but uses pymissive.providers.* paths instead of missive.providers.*
 
 To add a new provider:
 1. Add its import path as a key in MISSIVE_CONFIG_PROVIDERS below
@@ -15,7 +15,10 @@ Environment variables from .env file will override default values if present.
 import os
 from typing import Any, Dict, Optional, Type
 
-from python_missive.address_backends import BaseAddressBackend
+try:
+    from geoaddress import BaseAddressBackend
+except ImportError:
+    from pymissive.address_backends import BaseAddressBackend
 
 
 def _get_env_or_default(key: str, default: str) -> str:
@@ -25,21 +28,21 @@ def _get_env_or_default(key: str, default: str) -> str:
 
 MISSIVE_CONFIG_PROVIDERS = {
     # Email providers
-    "python_missive.providers.brevo.BrevoProvider": {
+    "pymissive.providers.brevo.BrevoProvider": {
         "BREVO_API_KEY": _get_env_or_default("BREVO_API_KEY", "test_token"),
         "BREVO_DEFAULT_FROM_EMAIL": _get_env_or_default(
             "BREVO_DEFAULT_FROM_EMAIL", "noreply@example.com"
         ),
         "BREVO_SMS_SENDER": _get_env_or_default("BREVO_SMS_SENDER", ""),
     },
-    "python_missive.providers.sendgrid.SendGridProvider": {
+    "pymissive.providers.sendgrid.SendGridProvider": {
         "SENDGRID_API_KEY": _get_env_or_default("SENDGRID_API_KEY", "test_key"),
     },
-    "python_missive.providers.mailgun.MailgunProvider": {
+    "pymissive.providers.mailgun.MailgunProvider": {
         "MAILGUN_API_KEY": _get_env_or_default("MAILGUN_API_KEY", "test_key"),
         "MAILGUN_DOMAIN": _get_env_or_default("MAILGUN_DOMAIN", "test.example.com"),
     },
-    "python_missive.providers.smtp.SMTPProvider": {
+    "pymissive.providers.smtp.SMTPProvider": {
         "SMTP_HOST": _get_env_or_default("SMTP_HOST", "localhost"),
         "SMTP_PORT": int(_get_env_or_default("SMTP_PORT", "1025")),
         "SMTP_USERNAME": _get_env_or_default("SMTP_USERNAME", ""),
@@ -53,7 +56,7 @@ MISSIVE_CONFIG_PROVIDERS = {
             "SMTP_DEFAULT_FROM_EMAIL", "noreply@example.com"
         ),
     },
-    "python_missive.providers.ses.SESProvider": {
+    "pymissive.providers.ses.SESProvider": {
         "AWS_ACCESS_KEY_ID": _get_env_or_default("AWS_ACCESS_KEY_ID", "test_key"),
         "AWS_SECRET_ACCESS_KEY": _get_env_or_default(
             "AWS_SECRET_ACCESS_KEY", "test_secret"
@@ -62,7 +65,7 @@ MISSIVE_CONFIG_PROVIDERS = {
         "SES_FROM_EMAIL": _get_env_or_default("SES_FROM_EMAIL", "noreply@example.com"),
     },
     # SMS/Voice providers (multi-types)
-    "python_missive.providers.smspartner.SMSPartnerProvider": {
+    "pymissive.providers.smspartner.SMSPartnerProvider": {
         "SMSPARTNER_API_KEY": _get_env_or_default("SMSPARTNER_API_KEY", "test_key"),
         "SMSPARTNER_SENDER": _get_env_or_default("SMSPARTNER_SENDER", "TestSender"),
         "SMSPARTNER_WEBHOOK_IPS": _get_env_or_default("SMSPARTNER_WEBHOOK_IPS", ""),
@@ -70,34 +73,34 @@ MISSIVE_CONFIG_PROVIDERS = {
         "DEFAULT_FROM_EMAIL": _get_env_or_default("DEFAULT_FROM_EMAIL", ""),
         "DEFAULT_FROM_NAME": _get_env_or_default("DEFAULT_FROM_NAME", ""),
     },
-    "python_missive.providers.twilio.TwilioProvider": {
+    "pymissive.providers.twilio.TwilioProvider": {
         "TWILIO_ACCOUNT_SID": _get_env_or_default("TWILIO_ACCOUNT_SID", "test_sid"),
         "TWILIO_AUTH_TOKEN": _get_env_or_default("TWILIO_AUTH_TOKEN", "test_token"),
         "TWILIO_PHONE_NUMBER": _get_env_or_default(
             "TWILIO_PHONE_NUMBER", "+1234567890"
         ),
     },
-    "python_missive.providers.vonage.VonageProvider": {
+    "pymissive.providers.vonage.VonageProvider": {
         "VONAGE_API_KEY": _get_env_or_default("VONAGE_API_KEY", "test_key"),
         "VONAGE_API_SECRET": _get_env_or_default("VONAGE_API_SECRET", "test_secret"),
         "VONAGE_FROM_NUMBER": _get_env_or_default("VONAGE_FROM_NUMBER", "+1234567890"),
     },
     # Postal/LRE providers
-    "python_missive.providers.ar24.AR24Provider": {
+    "pymissive.providers.ar24.AR24Provider": {
         "AR24_API_TOKEN": _get_env_or_default("AR24_API_TOKEN", ""),
         "AR24_API_URL": _get_env_or_default("AR24_API_URL", "https://api.ar24.fr"),
         "AR24_SENDER_ID": _get_env_or_default("AR24_SENDER_ID", ""),
     },
-    "python_missive.providers.laposte.LaPosteProvider": {
+    "pymissive.providers.laposte.LaPosteProvider": {
         "LAPOSTE_API_KEY": _get_env_or_default("LAPOSTE_API_KEY", "test_key"),
     },
-    "python_missive.providers.maileva.MailevaProvider": {
+    "pymissive.providers.maileva.MailevaProvider": {
         "MAILEVA_CLIENTID": _get_env_or_default("MAILEVA_CLIENTID", "test_client"),
         "MAILEVA_SECRET": _get_env_or_default("MAILEVA_SECRET", "test_secret"),
         "MAILEVA_USERNAME": _get_env_or_default("MAILEVA_USERNAME", "test_user"),
         "MAILEVA_PASSWORD": _get_env_or_default("MAILEVA_PASSWORD", "test_pass"),
     },
-    "python_missive.providers.certeurope.CerteuropeProvider": {
+    "pymissive.providers.certeurope.CerteuropeProvider": {
         "CERTEUROPE_API_KEY": _get_env_or_default("CERTEUROPE_API_KEY", "test_key"),
         "CERTEUROPE_API_SECRET": _get_env_or_default(
             "CERTEUROPE_API_SECRET", "test_secret"
@@ -110,35 +113,35 @@ MISSIVE_CONFIG_PROVIDERS = {
         ),
     },
     # Push notification providers
-    "python_missive.providers.apn.APNProvider": {
+    "pymissive.providers.apn.APNProvider": {
         "APN_CERTIFICATE_PATH": _get_env_or_default("APN_CERTIFICATE_PATH", ""),
         "APN_KEY_ID": _get_env_or_default("APN_KEY_ID", ""),
         "APN_TEAM_ID": _get_env_or_default("APN_TEAM_ID", ""),
     },
-    "python_missive.providers.fcm.FCMProvider": {
+    "pymissive.providers.fcm.FCMProvider": {
         "FCM_SERVER_KEY": _get_env_or_default("FCM_SERVER_KEY", "test_key"),
     },
     # Branded messaging providers
-    "python_missive.providers.telegram.TelegramProvider": {
+    "pymissive.providers.telegram.TelegramProvider": {
         "TELEGRAM_BOT_TOKEN": _get_env_or_default("TELEGRAM_BOT_TOKEN", "test_token"),
     },
-    "python_missive.providers.slack.SlackProvider": {
+    "pymissive.providers.slack.SlackProvider": {
         "SLACK_BOT_TOKEN": _get_env_or_default("SLACK_BOT_TOKEN", "test_token"),
         "SLACK_SIGNING_SECRET": _get_env_or_default(
             "SLACK_SIGNING_SECRET", "test_secret"
         ),
     },
-    "python_missive.providers.teams.TeamsProvider": {
+    "pymissive.providers.teams.TeamsProvider": {
         "TEAMS_CLIENT_ID": _get_env_or_default("TEAMS_CLIENT_ID", "test_client_id"),
         "TEAMS_CLIENT_SECRET": _get_env_or_default(
             "TEAMS_CLIENT_SECRET", "test_secret"
         ),
         "TEAMS_TENANT_ID": _get_env_or_default("TEAMS_TENANT_ID", "test_tenant_id"),
     },
-    "python_missive.providers.signal.SignalProvider": {
+    "pymissive.providers.signal.SignalProvider": {
         "SIGNAL_API_KEY": _get_env_or_default("SIGNAL_API_KEY", "test_key"),
     },
-    "python_missive.providers.messenger.MessengerProvider": {
+    "pymissive.providers.messenger.MessengerProvider": {
         "MESSENGER_PAGE_ACCESS_TOKEN": _get_env_or_default(
             "MESSENGER_PAGE_ACCESS_TOKEN", "test_token"
         ),
@@ -147,7 +150,7 @@ MISSIVE_CONFIG_PROVIDERS = {
         ),
     },
     # In-app notification provider (no config needed)
-    "python_missive.providers.notification.InAppNotificationProvider": {},
+    "pymissive.providers.notification.InAppNotificationProvider": {},
 }
 
 # =============================================================================
@@ -159,7 +162,7 @@ MISSIVE_CONFIG_PROVIDERS = {
 MISSIVE_CONFIG_ADDRESS_BACKENDS = [
     # Free backends (no API key required) - try these first
     {
-        "class": "python_missive.address_backends.nominatim.NominatimAddressBackend",
+        "class": "pymissive.address_backends.nominatim.NominatimAddressBackend",
         "config": {
             "NOMINATIM_USER_AGENT": _get_env_or_default(
                 "NOMINATIM_USER_AGENT", "python-missive-test/1.0"
@@ -170,7 +173,7 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
         },
     },
     {
-        "class": "python_missive.address_backends.photon.PhotonAddressBackend",
+        "class": "pymissive.address_backends.photon.PhotonAddressBackend",
         "config": {
             "PHOTON_BASE_URL": _get_env_or_default(
                 "PHOTON_BASE_URL", "https://photon.komoot.io"
@@ -179,7 +182,7 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
     },
     # Free tier backends (API key required, but free tier available) - try these next
     {
-        "class": "python_missive.address_backends.locationiq.LocationIQAddressBackend",
+        "class": "pymissive.address_backends.locationiq.LocationIQAddressBackend",
         "config": {
             "LOCATIONIQ_API_KEY": _get_env_or_default("LOCATIONIQ_API_KEY", ""),
             "LOCATIONIQ_BASE_URL": _get_env_or_default(
@@ -188,7 +191,7 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
         },
     },
     {
-        "class": "python_missive.address_backends.opencage.OpenCageAddressBackend",
+        "class": "pymissive.address_backends.opencage.OpenCageAddressBackend",
         "config": {
             "OPENCAGE_API_KEY": _get_env_or_default("OPENCAGE_API_KEY", ""),
             "OPENCAGE_BASE_URL": _get_env_or_default(
@@ -197,7 +200,7 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
         },
     },
     {
-        "class": "python_missive.address_backends.geocode_earth.GeocodeEarthAddressBackend",
+        "class": "pymissive.address_backends.geocode_earth.GeocodeEarthAddressBackend",
         "config": {
             "GEOCODE_EARTH_API_KEY": _get_env_or_default("GEOCODE_EARTH_API_KEY", ""),
             "GEOCODE_EARTH_BASE_URL": _get_env_or_default(
@@ -206,7 +209,7 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
         },
     },
     {
-        "class": "python_missive.address_backends.geoapify.GeoapifyAddressBackend",
+        "class": "pymissive.address_backends.geoapify.GeoapifyAddressBackend",
         "config": {
             "GEOAPIFY_API_KEY": _get_env_or_default("GEOAPIFY_API_KEY", ""),
             "GEOAPIFY_BASE_URL": _get_env_or_default(
@@ -215,7 +218,7 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
         },
     },
     {
-        "class": "python_missive.address_backends.maps_co.MapsCoAddressBackend",
+        "class": "pymissive.address_backends.maps_co.MapsCoAddressBackend",
         "config": {
             "MAPS_CO_API_KEY": _get_env_or_default("MAPS_CO_API_KEY", ""),
             "MAPS_CO_BASE_URL": _get_env_or_default(
@@ -225,19 +228,19 @@ MISSIVE_CONFIG_ADDRESS_BACKENDS = [
     },
     # Paid backends (API key required) - try these if free ones fail
     {
-        "class": "python_missive.address_backends.google_maps.GoogleMapsAddressBackend",
+        "class": "pymissive.address_backends.google_maps.GoogleMapsAddressBackend",
         "config": {
             "GOOGLE_MAPS_API_KEY": _get_env_or_default("GOOGLE_MAPS_API_KEY", ""),
         },
     },
     {
-        "class": "python_missive.address_backends.mapbox.MapboxAddressBackend",
+        "class": "pymissive.address_backends.mapbox.MapboxAddressBackend",
         "config": {
             "MAPBOX_ACCESS_TOKEN": _get_env_or_default("MAPBOX_ACCESS_TOKEN", ""),
         },
     },
     {
-        "class": "python_missive.address_backends.here.HereAddressBackend",
+        "class": "pymissive.address_backends.here.HereAddressBackend",
         "config": {
             "HERE_APP_ID": _get_env_or_default("HERE_APP_ID", ""),
             "HERE_APP_CODE": _get_env_or_default("HERE_APP_CODE", ""),
@@ -255,7 +258,7 @@ def _load_address_backend_class(backend_path: str) -> Type[BaseAddressBackend]:
 
     This is a wrapper around the function in helpers.py for backward compatibility.
     """
-    from python_missive.helpers import \
+    from pymissive.helpers import \
         _load_address_backend_class as load_class
 
     return load_class(backend_path)
@@ -282,7 +285,7 @@ def get_working_address_backend(
         ...     result = backend.validate_address("123 Main St", city="Paris", country="FR")
         ...     print(f"Address valid: {result['is_valid']}")
     """
-    from python_missive.helpers import get_address_backends_from_config
+    from pymissive.helpers import get_address_backends_from_config
 
     if test_address is None:
         test_address = {

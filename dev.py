@@ -41,6 +41,7 @@ if platform.system() == "Windows" and not os.environ.get("ANSICON"):
 PROJECT_ROOT = Path(__file__).resolve().parent
 SRC_DIR = PROJECT_ROOT / "src"
 TESTS_DIR = PROJECT_ROOT / "tests"
+PYTHON_GEOADDRESS_DIR = PROJECT_ROOT.parent / 'python-geoaddress'
 
 
 def _resolve_venv_dir() -> Path:
@@ -130,7 +131,7 @@ def get_code_directories() -> list[str]:
             if candidate.is_dir() and not candidate.name.endswith(".egg-info"):
                 targets.append(str(candidate.relative_to(PROJECT_ROOT)))
 
-    package_dir = PROJECT_ROOT / "python_missive"
+    package_dir = PROJECT_ROOT / "pymissive"
     if package_dir.exists() and package_dir.is_dir():
         targets.append(str(package_dir.relative_to(PROJECT_ROOT)))
 
@@ -140,7 +141,7 @@ def get_code_directories() -> list[str]:
     return targets or ["."]
 
 
-def get_primary_package(default: str = "python_missive") -> str:
+def get_primary_package(default: str = "pymissive") -> str:
     name = read_project_name()
     if name:
         return name.replace("-", "_")
@@ -331,7 +332,7 @@ def _show_installation_status(module_path: str | None = None) -> None:
     python_exec = VENV_BIN / ("python.exe" if platform.system() == "Windows" else "python")
     
     command_lines = [
-        "from python_missive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
+        "from pymissive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
         "",
         "providers_config = " + repr(providers_config),
         "providers_config_dict = " + repr(providers_config_dict),
@@ -469,6 +470,37 @@ def task_install_dev() -> bool:
 
     print_success("Development installation complete.")
     return True
+
+
+def task_update_geoaddress() -> bool:
+    """Install or update python-geoaddress from local directory.
+    
+    Usage:
+      python dev.py update-geoaddress [path_to_python_geoaddress]
+    
+    - If a path is provided, it is used (editable install).
+    - Otherwise defaults to the sibling directory ../python-geoaddress.
+    """
+    if not venv_exists() and not task_venv():
+        return False
+    
+    args = sys.argv[2:]
+    target_dir = Path(args[0]) if args else PYTHON_GEOADDRESS_DIR
+    
+    if not target_dir.exists():
+        print_error(
+            f"python-geoaddress directory not found at {target_dir}. "
+            "Provide a correct path: python dev.py update-geoaddress /path/to/python-geoaddress"
+        )
+        return False
+    
+    print_info("Installing python-geoaddress into the virtual environment...")
+    if run_command([str(PIP), "install", "-e", str(target_dir)]):
+        print_success("python-geoaddress installed/updated successfully.")
+        return True
+    
+    print_error("Failed to install/update python-geoaddress.")
+    return False
 
 
 def task_clean_build() -> bool:
@@ -641,8 +673,8 @@ def task_list_providers() -> bool:
     python_exec = VENV_BIN / ("python.exe" if platform.system() == "Windows" else "python")
     
     command_lines = [
-        "from python_missive.helpers import get_providers_from_config",
-        "from python_missive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
+        "from pymissive.helpers import get_providers_from_config",
+        "from pymissive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
         "",
         "providers_config = " + repr(providers_config),
         "providers_config_dict = " + repr(providers_config_dict),
@@ -754,7 +786,7 @@ def task_list_providers_config() -> bool:
     python_exec = VENV_BIN / ("python.exe" if platform.system() == "Windows" else "python")
     
     command_lines = [
-        "from python_missive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
+        "from pymissive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
         "",
         "providers_config = " + repr(providers_config),
         "providers_config_dict = " + repr(providers_config_dict),
@@ -885,7 +917,7 @@ def task_provider_info() -> bool:
         "import json",
         "import os",
         "from pathlib import Path",
-        "from python_missive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
+        "from pymissive.providers import load_provider_class, get_provider_name_from_path, ProviderImportError",
         "",
         "# Load .env file if it exists",
         "_env_file = Path('.env')",
@@ -1031,7 +1063,7 @@ def task_address_info() -> bool:
         "sys.path.insert(0, str(Path.cwd() / 'src'))",
         "",
         "from tests.test_config import MISSIVE_CONFIG_ADDRESS_BACKENDS",
-        "from python_missive.helpers import describe_address_backends",
+        "from pymissive.helpers import describe_address_backends",
         "",
         "payload = describe_address_backends(MISSIVE_CONFIG_ADDRESS_BACKENDS)",
         "items = payload.get('items', [])",
@@ -1299,7 +1331,7 @@ def task_check() -> bool:
             )
             return False
 
-        module_name = "python_missive.providers"
+        module_name = "pymissive.providers"
         class_name = providers[provider_name][1]
 
         # Try to load config from MISSIVE_CONFIG_PROVIDERS
@@ -1845,6 +1877,7 @@ COMMANDS = {
     "install": task_install,
     "install-dev": task_install_dev,
     "venv-clean": task_venv_clean,
+    "update-geoaddress": task_update_geoaddress,
     "clean": task_clean,
     "clean-build": task_clean_build,
     "clean-pyc": task_clean_pyc,

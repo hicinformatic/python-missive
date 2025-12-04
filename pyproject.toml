@@ -42,6 +42,6 @@ show_error_codes = true
 # Ignore mixin attribute errors (they are provided by BaseProvider)
 [[tool.mypy.overrides]]
 module = [
-    "python_missive.providers.base.*",
+    "pymissive.providers.base.*",
 ]
 ignore_errors = true
